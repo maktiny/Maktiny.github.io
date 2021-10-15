@@ -1,0 +1,13 @@
+######################
+learn tmux 
+2021.8.28
+
+tmux new -s name      创建会话
+tmux detach           离开会话，会话线程继续存在
+tmux ls               显示会话数
+tmux attach -t name   连接会话
+tmux kill-session -t name 杀死会话等于exit
+tmux switch -t name   切换会话
+tmux split-window -h   把会话分成左右两个窗口
+Ctrl+b+;              光标在两个窗口切换
+Ctrl+b+o              左右两个窗口换位  

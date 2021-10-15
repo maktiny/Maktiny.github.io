@@ -1,37 +1,18 @@
-## Welcome to GitHub Pages
+---
+layout: default
+---
 
-You can use the [editor on GitHub](https://github.com/Maktiny/Maktiny.github.io/edit/main/index.md) to maintain and preview the content for your website in Markdown files.
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+## Navigation
 
-### Markdown
+[GitHub](https://github.com/Maktiny)
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
+## Tips
+*   [System V psABI：i386与x86_64函数传参的区别](./docs/tips/linux_notes/function_call.md)
 
-```markdown
-Syntax highlighted code block
-
-# Header 1
-## Header 2
-### Header 3
-
-- Bulleted
-- List
-
-1. Numbered
-2. List
-
-**Bold** and _Italic_ and `Code` text
-
-[Link](url) and ![Image](src)
-```
-
-For more details see [GitHub Flavored Markdown](https://guides.github.com/features/mastering-markdown/).
-
-### Jekyll Themes
-
-Your Pages site will use the layout and styles from the Jekyll theme you have selected in your [repository settings](https://github.com/Maktiny/Maktiny.github.io/settings/pages). The name of this theme is saved in the Jekyll `_config.yml` configuration file.
-
-### Support or Contact
-
-Having trouble with Pages? Check out our [documentation](https://docs.github.com/categories/github-pages-basics/) or [contact support](https://support.github.com/contact) and we’ll help you sort it out.
+## Friends
+*   [niugenen](https://niugenen.github.io/)
+*   [limaomao820](https://limaomao821.github.io/)
+*   [SPC的自由天空](https://blog.spcsky.com/)
+*   [utopianfuture](https://utopianfuture.github.io/)
+# Maktiny.github.io
