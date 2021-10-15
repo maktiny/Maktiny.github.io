@@ -1,5 +1,11 @@
 ---
 layout: default
+title: Maktiny
+description: 日升月落 ， 又一个夏秋.
+show_downloads: false
+google_analytics: true
+theme: jekyll-theme-cayman
+author: Maktiny
 ---
 
 
@@ -15,4 +21,4 @@ layout: default
 *   [limaomao820](https://limaomao821.github.io/)
 *   [SPC的自由天空](https://blog.spcsky.com/)
 *   [utopianfuture](https://utopianfuture.github.io/)
-# Maktiny.github.io
+*   [Martins3](https://martins3.github.io/)
