@@ -3,7 +3,7 @@
 - https://medium.com/@daeseok.youn/prepare-the-environment-for-developing-linux-kernel-with-qemu-c55e37ba8ade
 # 先qemu运行kernel
 ```
-qemu-system-x86_64 -s -S -kernel arch/x86/boot/bzImage -boot c -m 2048M -hda buildroot/output/images/rootfs.ext2 -append "root=/dev/sda rw console=ttyS0,115200 acpi=off nokaslr" -serial stdio -display none
+qemu-system-x86_64 -s -S -kernel arch/x86_64/boot/bzImage -boot c -m 2048M -hda buildroot/output/images/rootfs.ext2 -append "root=/dev/sda rw console=ttyS0,115200 acpi=off nokaslr" -serial stdio -display none
 ```
 
 ## 另一终端运行gdb

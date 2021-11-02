@@ -1,7 +1,7 @@
 # tips of some tools using
 ## shell 
 1. find . -name "*.c" | xargs rm -rfv  批量刪除當前目錄下的.c文件
-2. 
+2. grep -rn "内容" 路径  #遍历路径下的所有文件，字符串匹配" "中的内容
 3. 
 4. 
 5. 
@@ -17,8 +17,8 @@
 15.
 
 ## fmt
-1. o ':x86_64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00:\xff\xff\xff\xff\xff\xfe\xfe\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/tmp/qemu-x86_64:C' > /proc/sys/fs/binfmt_misc/register
-   o -1 > 文件路径, 当一个文件不能写入的时候， ”echo -1 > 路径“ 修改权限并清空
+1. echo ':x86_64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00:\xff\xff\xff\xff\xff\xfe\xfe\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/tmp/qemu-x86_64:C' > /proc/sys/fs/binfmt_misc/register
+   echo -1 > 文件路径, 当一个文件不能写入的时候， ”echo -1 > 路径“ 修改权限并清空
 
 
 ## tmux 
@@ -52,3 +52,9 @@ vim a.txt b.txt    同时编辑两个文件
 7. git checkout --<filename>  #使用本地HEAD替换工作区的文件，提交到index暂存区的数据不受影响
 8. git fetch origin 
 git reset --hard master #放弃本地修改，从远端拿最新的历史版本，并将本地分支指向它
+9. git rebase -i HEAD~number #合并最新提交记录commit往前number个commit到一条提交记录
+10. git reset --soft HEAD^1
+    git commit --amend  #合并两个commit为一个
+11. 如果你想放弃这次压缩的话，执行以下命令：
+      git rebase --abort
+
