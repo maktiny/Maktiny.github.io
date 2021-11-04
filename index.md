@@ -15,6 +15,8 @@ author: Maktiny
 
 ## Tips
 *   [System V psABI：i386与x86_64函数传参的区别](./docs/tips/linux_notes/function_call.md)
+*   [Ext4](./docs/tips/linux_notes/Ext4.md)
+
 
 ## Friends
 *   [niugenen](https://niugenen.github.io/)
