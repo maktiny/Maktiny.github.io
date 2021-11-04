@@ -1,19 +1,23 @@
 ## linux Ext4 文件系统简介
 
 ### Ext 文件的发展史
+
 1. MINIX : 微机的一个非常小的Unix操作系统，最多能处理14个字符的文件名，只能处理 64MB 的存储空间
 2. EXT1: 第一个利用虚拟文件系统, 2GB存储空间并处理255个字符的文件
 3. EXT2: 商业级文件系统, GB级别的最大文件大小和TB级别的文件系统大小
 4. EXT3 : 增加日志功能
 5. EXT4：提供更佳的性能和可靠性,更大的文件系统和更大的文件、无限数量的子目录、Extents、多块分配、延迟分配,快速 fsck、日志校验，No Journaling模式
 
+
 ##### MBR分区和 GPT分区
+
 1. MBR的意思是“主引导记录”，是IBM公司早年间提出的。它是存在于磁盘驱动器开始部分的一个特殊的启动扇区。
 这个扇区包含了引导程序(grub)和已安装的操作系统系统信息。
 2. GPT的意思是GUID Partition Table，即“全局唯一标识磁盘分区表”。它是另外一种更加先进新颖的磁盘组织方式，
 一种使用UEFI启动的磁盘组织方式。因为其更大的支持内存（mbr分区最多支持2T的磁盘，GPT支持2T以上）
 
 ###### BIOS + MBR 启动系统
+
 1. BIOS下启动操作系统之前，必须从硬盘上指定扇区读取系统启动代码
 （包含在MBR主引导记录中），然后从活动分区中引导启动操作系统，所以在BIOS下引导安装Windows
 操作系统，我们不得不使用一些工具（DiskGenius）对硬盘进行配置以达到启动要求
@@ -21,6 +25,7 @@
 
 
 ###### UEFI + GPT 启动系统
+
 1. UEFI之所以比BIOS强大，是因为UEFI本身已经相当于一个微型操作系统，其带来的便利之处在于：首先，UEFI已具备文件系统
 （文件系统是操作系统组织管理文件的一种方法，直白点说就是把硬盘上的数据以文件的形式呈现给用户。
 Fat32、NTFS都是常见的文件系统类型）的支持，它能够直接读取FAT分区中的文件；其次，
@@ -29,6 +34,7 @@ Fat32、NTFS都是常见的文件系统类型）的支持，它能够直接读�
 
 
 ##### 启动linux系统步骤
+
 1. 开机之后，处理器进入实模式，实模式采用段式内存管理，并没有开启分页机制(CR3没有置位)
 内存被分成固定的64k大小的块
 2. 然后开始跳转到BIOS的入口地址开始执行。BIOS执行初始化和硬件检查之后，开始寻找引导设备(程序)
@@ -44,10 +50,13 @@ Fat32、NTFS都是常见的文件系统类型）的支持，它能够直接读�
 6. kernel的setup()函数初始化硬件设备和内核运行环境，设置CR0的PE位为0,从实模式切换到保护模式，跳转到startup_32，调用startup_32()函数继续一些初始化的工作
 7. startup_32()函数调用start_kernel()，该函数完成内核的初始化，到这里linux内核才起来开始运行。
 
+
 ### Ext4的磁盘布局
+
 ![2021-11-03 14-41-19 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1gw1yk8pxvnj30py0cc784.jpg)
 
 ![2021-11-03 14-14-17 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1gw1ykmjk46j30pm07eq4f.jpg)
+
 
 1. Ext4文件系统把整个分区划分成各个block group（块组）
 2. 1024 bytes 的 Group 0 Padding（boot block）只有 块组0 有，用于装载该分区的操作系统。
@@ -56,12 +65,14 @@ Fat32、NTFS都是常见的文件系统类型）的支持，它能够直接读�
  所以就不需要选择)，读入活动分区的引导块(Boot block)，引导块再加载该分区中的操作系统
 ![2021-11-03 16-04-27 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShgy1gw20vn1z2mj30n9070acd.jpg)
 
+
 ```
 ext4_super_block  超级块
 ext4_group_desc 组描述符
 ext4_inode 索引节点-——> 索引节点在内存的数据结构ext4_inode_info
 inode table 索引节点表是struct ext4_inode的线性数组
 ```
+
 3. 符号连接的路径名小于60B,存放在索引节点的i_blocks字段,大于60B就需要分配数据块
 4. 设备文件，管道，套接字等特殊文件不需要数据块，所有信息存储在索引节点。
 5. ext4_super_block数据结构是超级块在磁盘的存储模式，其在内存的数据结构
@@ -71,6 +82,7 @@ inode table 索引节点表是struct ext4_inode的线性数组
 7. VFS的相关操作函数都是通过注册为ext4处理函数的方式实现，
 这样VFS就能屏蔽硬件，与硬件相关的各种文件系统的实现VFS都不关心，VFS只需要提供文件处理相关的接口，
 相应的文件系统ext4,xfs,zfs等，只需要把文件处理函数注册到VFS,VFS就能实现多个文件系统的兼容。
+
 ```
     # ext4向VFS注册文件操作接口
 const struct file_operations ext4_file_operations = {
@@ -109,8 +121,11 @@ const struct inode_operations ext4_file_inode_operations = {
 
 
 ###### 索引节点的增强属性 
+
 1. inode索引节点的大小一般128B，当需要增加属性的时候，就会
 使用inode的i_file_acl_lo字段指向增强属性。
+
+
 ```
     #索引节点增强属性描述符(属性名，属性值) 为了实现访问控制列表
 
@@ -129,7 +144,10 @@ ext4_xattr_set() ext4_xattr_get() ext4_xattr_list_entries()等函数处理该属
 ```
 
 ###### 目录
+
 1. 目录是一种特殊的文件，这种文件的数据块内存放的数据是目录名称和索引节点
+
+
 ```
   ##目录项结构
 struct ext4_dir_entry_2 {
@@ -141,10 +159,14 @@ struct ext4_dir_entry_2 {
 };
 
 ```
+
 ###### 目录的查找
+
 1. 如果目录的inode的flag被设置为EXT4_INDEX_FL (0x1000)，则目录项对象使用hash btree(htree)组织,加快查找速度。
 2.  hash btree 参考：https://blog.csdn.net/yang_yulei/article/details/46337405
+
 ![2021-11-04 16-37-18 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShgy1gw37g2qpnfj30q2085aev.jpg)
+
 
 ```
 
@@ -204,9 +226,13 @@ struct dx_tail {             ---------------------------校验和
 
 
 ##### 文件(数据块)在磁盘中如何寻址(文件块的组织方式) extent tree(B tree)
+
 1. ext4 inode 的i_block字段60B, 可以包含一个ext4_extent_header, 4个ext4_extent_idx，
 还剩下4B校验和。
+
 ![2021-11-04 15-19-45 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShgy1gw358qa6c1j30k30kwn33.jpg)
+
+
 ```
   #4B 的校验和
 struct ext4_extent_tail {
@@ -257,6 +283,7 @@ struct ext4_extent_header {
 
 
 ##### 文件的洞
+
 1. 当要删除文件的尾部数据的时候可以调用*ext4_truncate()*函数，
 释放文件尾部的数据块
 2. 要删除文件中间部分的数据的时候就产生洞，调用*ext4_punch_hole()*
@@ -265,6 +292,7 @@ struct ext4_extent_header {
 
 
 ###### 日志的写入
+
 1. journal ：将metadata和data全部记录到日志；先写日志确保日志写入成功再写用户数据
 fsync(data journal) -> fsync(metadata journal) -> fsync(data) -> fsync(metadata)
    优缺点：当写入数据很大时，性能低，安全性最高
