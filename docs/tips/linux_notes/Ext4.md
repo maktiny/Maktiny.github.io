@@ -63,7 +63,154 @@ Fat32、NTFS都是常见的文件系统类型）的支持，它能够直接读�
 ```
 ext4_super_block  超级块
 ext4_group_desc 组描述符
-ext4_inode  索引节点
+ext4_inode 索引节点-——> 索引节点在内存的数据结构ext4_inode_info
+inode table 索引节点表是struct ext4_inode的线性数组
+```
+3. 符号连接的路径名小于60B,存放在索引节点的i_blocks字段,大于60B就需要分配数据块
+4. 设备文件，管道，套接字等特殊文件不需要数据块，所有信息存储在索引节点。
+5. ext4_super_block数据结构是超级块在磁盘的存储模式，其在内存的数据结构
+表现为ext4_sb_info(VFS超级块super_block是对物理磁盘块的描述)，ext4_sb_info数据结构包含
+整个ext4文件系统的信息。
+6. 超级块和组描述符长期驻留内存(高速缓存)，
+7. VFS的相关操作函数都是通过注册为ext4处理函数的方式实现，
+这样VFS就能屏蔽硬件，与硬件相关的各种文件系统的实现VFS都不关心，VFS只需要提供文件处理相关的接口，
+相应的文件系统ext4,xfs,zfs等，只需要把文件处理函数注册到VFS,VFS就能实现多个文件系统的兼容。
+```
+## ext4向VFS注册文件操作接口
+const struct file_operations ext4_file_operations = {
+	.llseek		= ext4_llseek,
+	.read_iter	= ext4_file_read_iter,
+	.write_iter	= ext4_file_write_iter,
+	.iopoll		= iomap_dio_iopoll,
+	.unlocked_ioctl = ext4_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= ext4_compat_ioctl,
+#endif
+	.mmap		= ext4_file_mmap,
+	.mmap_supported_flags = MAP_SYNC,
+	.open		= ext4_file_open,
+	.release	= ext4_release_file,
+	.fsync		= ext4_sync_file,
+	.get_unmapped_area = thp_get_unmapped_area,
+	.splice_read	= generic_file_splice_read,
+	.splice_write	= iter_file_splice_write,
+	.fallocate	= ext4_fallocate,
+};
+
+const struct inode_operations ext4_file_inode_operations = {
+	.setattr	= ext4_setattr,
+	.getattr	= ext4_file_getattr,
+	.listxattr	= ext4_listxattr,
+	.get_acl	= ext4_get_acl,
+	.set_acl	= ext4_set_acl,
+	.fiemap		= ext4_fiemap,
+	.fileattr_get	= ext4_fileattr_get,
+	.fileattr_set	= ext4_fileattr_set,
+};
 
 ```
+
+
+
+###### 索引节点的增强属性 
+1. inode索引节点的大小一般128B，当需要增加属性的时候，就会
+使用inode的i_file_acl_lo字段指向增强属性。
+```
+##  索引节点增强属性描述符(属性名，属性值) 为了实现访问控制列表
+
+struct ext4_xattr_entry {
+	__u8	e_name_len;	/* length of name */
+	__u8	e_name_index;	/* attribute name index */
+	__le16	e_value_offs;	/* offset in disk block of value */
+	__le32	e_value_inum;	/* inode in which the value is stored */
+	__le32	e_value_size;	/* size of attribute value */
+	__le32	e_hash;		/* hash value of name and value */
+	char	e_name[];	/* attribute name */
+};
+
+ext4_xattr_set() ext4_xattr_get() ext4_xattr_list_entries()等函数处理该属性。
+
+```
+
+###### 目录
+1. 目录是一种特殊的文件，这种文件的数据块内存放的数据是目录名称和索引节点
+```
+## 目录项结构
+struct ext4_dir_entry_2 {
+	__le32	inode;			/* Inode number */
+	__le16	rec_len;		/* Directory entry length */
+	__u8	name_len;		/* Name length 最大255B*/ 
+	__u8	file_type;		/* See file type macros EXT4_FT_* below */
+	char	name[EXT4_NAME_LEN];	/* File name */
+};
+
+```
+###### 目录的查找
+1. 如果目录的inode的flag被设置为EXT4_INDEX_FL (0x1000)，则目录项对象使用hash btree(htree)组织
+2.  hash btree 参考：https://blog.csdn.net/yang_yulei/article/details/46337405
+![2021-11-04 16-37-18 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShgy1gw37g2qpnfj30q2085aev.jpg)
+
+```
+
+```
+
+
+##### 文件(数据块)在磁盘中如何寻址(文件块的组织方式) extent tree(B tree)
+![2021-11-04 15-19-45 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShgy1gw358qa6c1j30k30kwn33.jpg)
+```
+## 4B 的校验和
+struct ext4_extent_tail {
+	__le32	et_checksum;	/* crc32c(uuid+inum+extent_block) */
+};
+
+/*
+ * This is the extent on-disk structure.
+ * It's used at the bottom of the tree.
+ */
+ ## extent tree的页节点 12B
+struct ext4_extent {
+	__le32	ee_block;	/* first logical block extent covers */
+	__le16	ee_len;		/* number of blocks covered by extent */
+	__le16	ee_start_hi;	/* high 16 bits of physical block */
+	__le32	ee_start_lo;	/* low 32 bits of physical block */
+};
+
+/*
+ * This is index on-disk structure.
+ * It's used at all the levels except the bottom.
+ */
+ ## extent 的索引节点 12B
+struct ext4_extent_idx {
+	__le32	ei_block;	/* index covers logical blocks from 'block' */
+	__le32	ei_leaf_lo;	/* pointer to the physical block of the next *
+				 * level. leaf or next index could be there */
+	__le16	ei_leaf_hi;	/* high 16 bits of physical block */
+	__u16	ei_unused;
+};
+
+/*
+ * Each block (leaves and indexes), even inode-stored has header.
+ */
+ ## 头节点  12B
+struct ext4_extent_header {
+	__le16	eh_magic;	/* probably will support different formats */
+	__le16	eh_entries;	/* number of valid entries */
+	__le16	eh_max;		/* capacity of store in entries */
+	__le16	eh_depth;	/* has tree real underlying blocks? */
+	__le32	eh_generation;	/* generation of the tree */
+};
+```
+1. ext4 inode 的i_block字段60B, 可以包含一个ext4_extent_header, 4个ext4_extent_idx，
+还剩下4B校验和。
+
+
+
+
+
+##### 文件的洞
+1. 当要删除文件的尾部数据的时候可以调用*ext4_truncate()*函数，
+释放文件尾部的数据块
+2. 要删除文件中间部分的数据的时候就产生洞，调用*ext4_punch_hole()*
+释放文件的中间的数据块。虚拟化，云计算，数据库等场景下的大文件需要。
+虽然文件看起来很大，但是使用的空间很小。
 
