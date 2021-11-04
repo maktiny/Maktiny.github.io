@@ -1,9 +1,5 @@
 ## linux Ext4 文件系统简介
 
-1. 参考：https://blog.csdn.net/cumj63710/article/details/107393126
-2. 参考：https://blog.csdn.net/qq_40174198/article/details/109294578?spm=1001.2101.3001.6650.10&utm_medium=distribute.pc_relevant.none-task-blog-2%7Edefault%7EBlogCommendFromBaidu%7Edefault-10.no_search_link&depth_1-utm_source=distribute.pc_relevant.none-task-blog-2%7Edefault%7EBlogCommendFromBaidu%7Edefault-10.no_search_link
-3. 参考：https://blog.csdn.net/RJ0024/article/details/110492406?spm=1001.2101.3001.6650.15&utm_medium=distribute.pc_relevant.none-task-blog-2%7Edefault%7EBlogCommendFromBaidu%7Edefault-15.no_search_link&depth_1-utm_source=distribute.pc_relevant.none-task-blog-2%7Edefault%7EBlogCommendFromBaidu%7Edefault-15.no_search_link
-
 ### Ext 文件的发展史
 1. MINIX : 微机的一个非常小的Unix操作系统，最多能处理14个字符的文件名，只能处理 64MB 的存储空间
 2. EXT1: 第一个利用虚拟文件系统, 2GB存储空间并处理255个字符的文件
@@ -146,16 +142,70 @@ struct ext4_dir_entry_2 {
 
 ```
 ###### 目录的查找
-1. 如果目录的inode的flag被设置为EXT4_INDEX_FL (0x1000)，则目录项对象使用hash btree(htree)组织
+1. 如果目录的inode的flag被设置为EXT4_INDEX_FL (0x1000)，则目录项对象使用hash btree(htree)组织,加快查找速度。
 2.  hash btree 参考：https://blog.csdn.net/yang_yulei/article/details/46337405
 ![2021-11-04 16-37-18 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShgy1gw37g2qpnfj30q2085aev.jpg)
 
 ```
 
+struct dx_entry
+{
+	__le32 hash;
+	__le32 block;
+};
+
+/*
+ * dx_root_info is laid out so that if it should somehow get overlaid by a
+ * dirent the two low bits of the hash version will be zero.  Therefore, the
+ * hash version mod 4 should never be 0.  Sincerely, the paranoia department.
+ */
+
+struct dx_root               -------------- hash btree的根节点
+{
+	struct fake_dirent dot;
+	char dot_name[4];
+	struct fake_dirent dotdot;
+	char dotdot_name[4];
+	struct dx_root_info
+	{
+		__le32 reserved_zero;
+		u8 hash_version;
+		u8 info_length; /* 8 */
+		u8 indirect_levels;
+		u8 unused_flags;
+	}
+	info;
+	struct dx_entry	entries[];
+};
+
+struct dx_node        ---------------------子节点
+{
+	struct fake_dirent fake;
+	struct dx_entry	entries[];
+};
+
+
+struct dx_map_entry
+{
+	u32 hash;
+	u16 offs;
+	u16 size;
+};
+
+/*
+ * This goes at the end of each htree block.
+ */
+struct dx_tail {             ---------------------------校验和
+	u32 dt_reserved;
+	__le32 dt_checksum;	/* crc32c(uuid+inum+dirblock) */
+};
+
 ```
 
 
 ##### 文件(数据块)在磁盘中如何寻址(文件块的组织方式) extent tree(B tree)
+1. ext4 inode 的i_block字段60B, 可以包含一个ext4_extent_header, 4个ext4_extent_idx，
+还剩下4B校验和。
 ![2021-11-04 15-19-45 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShgy1gw358qa6c1j30k30kwn33.jpg)
 ```
 ## 4B 的校验和
@@ -182,7 +232,7 @@ struct ext4_extent {
  ## extent 的索引节点 12B
 struct ext4_extent_idx {
 	__le32	ei_block;	/* index covers logical blocks from 'block' */
-	__le32	ei_leaf_lo;	/* pointer to the physical block of the next *
+  __le32	ei_leaf_lo;	/* pointer to the physical block of the next *
 				 * level. leaf or next index could be there */
 	__le16	ei_leaf_hi;	/* high 16 bits of physical block */
 	__u16	ei_unused;
@@ -200,8 +250,7 @@ struct ext4_extent_header {
 	__le32	eh_generation;	/* generation of the tree */
 };
 ```
-1. ext4 inode 的i_block字段60B, 可以包含一个ext4_extent_header, 4个ext4_extent_idx，
-还剩下4B校验和。
+
 
 
 
@@ -213,4 +262,25 @@ struct ext4_extent_header {
 2. 要删除文件中间部分的数据的时候就产生洞，调用*ext4_punch_hole()*
 释放文件的中间的数据块。虚拟化，云计算，数据库等场景下的大文件需要。
 虽然文件看起来很大，但是使用的空间很小。
+
+
+###### 日志的写入
+1. journal ：将metadata和data全部记录到日志；先写日志确保日志写入成功再写用户数据
+fsync(data journal) -> fsync(metadata journal) -> fsync(data) -> fsync(metadata)
+   优缺点：当写入数据很大时，性能低，安全性最高
+
+2. ordered ：只将metadata写入到日志；先写用户数据(data)，之后再写日志，最后写用户数据(metadata)
+fsync(data) -> fsync(metadata journal) -> fsync(metadata) ---ext4的默认方式。
+   优缺点：当写入数据很大时，性能低，安全性最高
+
+3. writeback ：只将metadata写入到日志，先写日志确保日志写入成功之后再写用户数据，但不保证metadata和data的写入顺序
+fsync(metadata journal) -> fsync(metadata) / fsync(data)
+   优缺点：性能最好，安全性最低
+
+###### 参考：
+
+1. https://blog.csdn.net/cumj63710/article/details/107393126
+2. https://blog.csdn.net/qq_40174198/article/details/109294578?spm=1001.2101.3001.6650.10&utm_medium=distribute.pc_relevant.none-task-blog-2%7Edefault%7EBlogCommendFromBaidu%7Edefault-10.no_search_link&depth_1-utm_source=distribute.pc_relevant.none-task-blog-2%7Edefault%7EBlogCommendFromBaidu%7Edefault-10.no_search_link
+3. https://blog.csdn.net/RJ0024/article/details/110492406?spm=1001.2101.3001.6650.15&utm_medium=distribute.pc_relevant.none-task-blog-2%7Edefault%7EBlogCommendFromBaidu%7Edefault-15.no_search_link&depth_1-utm_source=distribute.pc_relevant.none-task-blog-2%7Edefault%7EBlogCommendFromBaidu%7Edefault-15.no_search_link
+4. https://ext4.wiki.kernel.org/index.php/Ext4_Disk_Layout#Multiple_Mount_Protection
 
