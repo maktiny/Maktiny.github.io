@@ -72,7 +72,7 @@ inode table 索引节点表是struct ext4_inode的线性数组
 这样VFS就能屏蔽硬件，与硬件相关的各种文件系统的实现VFS都不关心，VFS只需要提供文件处理相关的接口，
 相应的文件系统ext4,xfs,zfs等，只需要把文件处理函数注册到VFS,VFS就能实现多个文件系统的兼容。
 ```
-## ext4向VFS注册文件操作接口
+    # ext4向VFS注册文件操作接口
 const struct file_operations ext4_file_operations = {
 	.llseek		= ext4_llseek,
 	.read_iter	= ext4_file_read_iter,
@@ -112,7 +112,7 @@ const struct inode_operations ext4_file_inode_operations = {
 1. inode索引节点的大小一般128B，当需要增加属性的时候，就会
 使用inode的i_file_acl_lo字段指向增强属性。
 ```
-##  索引节点增强属性描述符(属性名，属性值) 为了实现访问控制列表
+    #索引节点增强属性描述符(属性名，属性值) 为了实现访问控制列表
 
 struct ext4_xattr_entry {
 	__u8	e_name_len;	/* length of name */
@@ -131,7 +131,7 @@ ext4_xattr_set() ext4_xattr_get() ext4_xattr_list_entries()等函数处理该属
 ###### 目录
 1. 目录是一种特殊的文件，这种文件的数据块内存放的数据是目录名称和索引节点
 ```
-## 目录项结构
+  ##目录项结构
 struct ext4_dir_entry_2 {
 	__le32	inode;			/* Inode number */
 	__le16	rec_len;		/* Directory entry length */
@@ -208,7 +208,7 @@ struct dx_tail {             ---------------------------校验和
 还剩下4B校验和。
 ![2021-11-04 15-19-45 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShgy1gw358qa6c1j30k30kwn33.jpg)
 ```
-## 4B 的校验和
+  #4B 的校验和
 struct ext4_extent_tail {
 	__le32	et_checksum;	/* crc32c(uuid+inum+extent_block) */
 };
@@ -229,7 +229,7 @@ struct ext4_extent {
  * This is index on-disk structure.
  * It's used at all the levels except the bottom.
  */
- ## extent 的索引节点 12B
+  ## extent 的索引节点 12B
 struct ext4_extent_idx {
 	__le32	ei_block;	/* index covers logical blocks from 'block' */
   __le32	ei_leaf_lo;	/* pointer to the physical block of the next *
@@ -241,7 +241,7 @@ struct ext4_extent_idx {
 /*
  * Each block (leaves and indexes), even inode-stored has header.
  */
- ## 头节点  12B
+  ## 头节点  12B
 struct ext4_extent_header {
 	__le16	eh_magic;	/* probably will support different formats */
 	__le16	eh_entries;	/* number of valid entries */
