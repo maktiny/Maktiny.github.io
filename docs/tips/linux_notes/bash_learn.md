@@ -1,6 +1,10 @@
 #!/bin/bash
 # 字符串，变量
 
+#从终端读取数据，空格隔开
+read=name
+
+
 name="json"
 echo "${name}"
 echo "I am $(pwd)"

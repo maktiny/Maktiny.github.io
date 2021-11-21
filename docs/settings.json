@@ -1,0 +1,116 @@
+{
+    /**
+     * @description: 编辑器配置
+     * @param {type}
+     * @return:
+     */
+    // 开机不显示欢迎页面
+    "workbench.startupEditor": "newUntitledFile",
+    // 显示左侧控制栏
+    "workbench.activityBar.visible": true,
+    // 颜色主题
+    "workbench.colorTheme": "Monokai",
+    // 禁用预览模式，单机文件名以新标签页打开
+    // "workbench.editor.enablePreview": false,
+    // minimap
+    "editor.minimap.enabled": true,
+    "editor.minimap.maxColumn": 80,
+    // 长度标尺线
+    "editor.rulers": [
+        80
+    ],
+    // 自动换行
+    "editor.wordWrap": "on",
+    // 字体大小
+    "editor.fontSize": 18,
+    // //实现对中文字符的自动匹配， UTF-8 和 GBK2312
+    // "files.autoGuessEncoding": true,
+    // 使用 Unix 的 LF 类型换行符，来保证 Github 上的格式统一
+    "files.eol": "\n",
+    // 光标焦点变化时，自动保存
+    "files.autoSave": "onFocusChange",
+    // 不显示缩排辅助线，使用 indent-rainbow 插件来代替
+    "editor.renderIndentGuides": false,
+    // 显示控制字符：https://www.zhihu.com/question/61638859
+    "editor.renderControlCharacters": true,
+    // 编辑器保存时就自动进行格式化
+    "editor.formatOnSave": true,
+    // // 代码提示是默认选择提示给出的首选项而不是最近选择项
+    // "editor.suggestSelection": "first",
+    // 在终端显示远程连接窗口
+    "remote.SSH.showLoginTerminal": true,
+    "remote.SSH.remotePlatform": {
+        "1080": "linux",
+        "2080": "linux",
+        "1080old": "linux",
+        "titan": "linux"
+    },
+    // "terminal.integrated.rendererType": "dom",
+    // 在Windows下使用cmd代替默认的powershell作为终端
+    //"terminal.integrated.shell.windows": "C:\\Windows\\System32\\cmd.exe",
+    /**
+     * @description: 功能类插件
+     * @param {type}
+     * @return:
+     */
+    // koroFileHeader 自动更新最后编辑时间、编辑人
+    "fileheader.customMade": {
+        "Description": "",
+        "Author": "shaonianruntu",
+        "Github": "https://github.com/shaonianruntu",
+        "Date": "Do not edit", // 文件创建时间(不变)
+        "LastEditTime": "Do not edit" // 文件最后编辑时间
+    },
+    // koroFileHeader 自动添加文件头部注释
+    "fileheader.configObj": {
+        "autoAdd": true // 默认开启
+    },
+    // open in browser 插件的默认浏览器设置
+    "explorer.confirmDelete": false,
+    "explorer.confirmDragAndDrop": false,
+    // Prettier - Code formatter 代码格式化插件的配置
+    "[html]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[javascript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[json]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    // Mardown All in One
+    "[markdown]": {
+        "editor.defaultFormatter": "yzhang.markdown-all-in-one"
+    },
+    // Python kite 代码提示插件
+    "kite.showWelcomeNotificationOnStartup": false,
+    // csscomb
+    // "csscomb.formatOnSave": true,
+    //"csscomb.preset": "zen",
+    /**
+     * @description: 语言类插件
+     * @param {type}
+     * @return:
+     */
+    // Python
+    // 默认对Python文件进行静态检查
+    "python.linting.enabled": true,
+    // 默认在Python文件保存时进行静态检查
+    "python.linting.lintOnSave": true,
+    // 使用flake8代替默认的pylint对Python文件进行静态检查
+    "python.linting.pylintEnabled": false,
+    "python.linting.flake8Enabled": true,
+    // flake8规则自定义设置
+    "python.linting.flake8Args": [
+        "--ignore=E231,E501,W291,W292,W391"
+    ],
+    // 使用yapf作为python的格式化工具
+    "python.formatting.provider": "yapf",
+    // JS
+    "javascript.updateImportsOnFileMove.enabled": "always",
+    // 允许在 js 中使用 html emment 语法
+    "emmet.includeLanguages": {
+        "javascript": "html"
+    },
+    "terminal.integrated.inheritEnv": false
+}
