@@ -63,3 +63,9 @@ vim a.txt b.txt    同时编辑两个文件
 15. git apply --check xxx.patch  ##查看补丁是否打上
 16. git format-patch HEAD^      #把最近的commit打成补丁
 
+
+17. git stash save "" #把当前的改动存起来，工作区恢复成干净的工作区
+18. git stash show #展示改动的文件
+19. git stash list  #展示所有打包的脏改动
+20. git stash pop stash@{数字}  #回复某个脏包到工作区
+21. git stash drop stash@{数字}  #删除某个脏包
