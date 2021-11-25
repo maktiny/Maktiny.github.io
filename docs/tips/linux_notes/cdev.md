@@ -1,9 +1,14 @@
-## 字符设备驱动程序
+### 字符设备驱动程序
 1. 设备号dev是一个范围，可以由宏解析出主设备号和次设备号。
 2. 设备号在统一范围的所有设备文件由同一个设备驱动程序处理。
-
+3. 字符设备一般不用缓冲，使用硬件设备提供的寄存器和中断即可与cpu通信
+4. 声卡等顺序设备的缓冲使用循环缓冲区。
 ```
-  /*设备驱动程序描述符*/
+  /*
+  *     设备驱动程序描述符
+  * cdev_alloc()分配cdev描述符
+  * cdev_add()在设备驱动模型中注册cdev描述符
+  **/
 struct cdev {
 	struct kobject kobj;
 	struct module *owner;
@@ -28,4 +33,7 @@ static struct char_device_struct {
 } *chrdevs[CHRDEV_MAJOR_HASH_SIZE];
 
 
+regietr_chrdev_region()和alloc_cgrdev_region()//分配一个范围的设备号
 ```
+
+### 块设备驱动程序

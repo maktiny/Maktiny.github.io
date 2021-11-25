@@ -51,10 +51,15 @@ vim a.txt b.txt    同时编辑两个文件
 6. git log --author=bob               #只查看bob的提交历史
 7. git checkout --<filename>  #使用本地HEAD替换工作区的文件，提交到index暂存区的数据不受影响
 8. git fetch origin 
-git reset --hard master #放弃本地修改，从远端拿最新的历史版本，并将本地分支指向它
+   git reset --hard master #放弃本地修改，从远端拿最新的历史版本，并将本地分支指向它
 9. git rebase -i HEAD~number #合并最新提交记录commit往前number个commit到一条提交记录
 10. git reset --soft HEAD^1
     git commit --amend  #合并两个commit为一个
 11. 如果你想放弃这次压缩的话，执行以下命令：
       git rebase --abort
+12. git commit -s    #写commit,尽量不要用git commit -m
+13. git log --online master  #查看log
+14. git apply --stat xxx.patch   #查看补丁情况
+15. git apply --check xxx.patch  ##查看补丁是否打上
+16. git format-patch HEAD^      #把最近的commit打成补丁
 
