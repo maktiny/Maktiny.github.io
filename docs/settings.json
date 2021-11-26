@@ -5,11 +5,16 @@
      * @return:
      */
     // 开机不显示欢迎页面
-    "workbench.startupEditor": "newUntitledFile",
+    //"workbench.startupEditor": "newUntitledFile",
+    "files.autoSave": "afterDelay",
+    "files.trimTrailingWhitespace": true,
+    "editor.autoClosingBrackets": "always",
+    "editor.autoClosingQuotes": "always",
+    "editor.renderWhitespace": "all",
     // 显示左侧控制栏
     "workbench.activityBar.visible": true,
     // 颜色主题
-    "workbench.colorTheme": "Monokai",
+    //"workbench.colorTheme": "Dark",
     // 禁用预览模式，单机文件名以新标签页打开
     // "workbench.editor.enablePreview": false,
     // minimap
@@ -22,7 +27,7 @@
     // 自动换行
     "editor.wordWrap": "on",
     // 字体大小
-    "editor.fontSize": 18,
+    "editor.fontSize": 15,
     // //实现对中文字符的自动匹配， UTF-8 和 GBK2312
     // "files.autoGuessEncoding": true,
     // 使用 Unix 的 LF 类型换行符，来保证 Github 上的格式统一
@@ -34,7 +39,7 @@
     // 显示控制字符：https://www.zhihu.com/question/61638859
     "editor.renderControlCharacters": true,
     // 编辑器保存时就自动进行格式化
-    "editor.formatOnSave": true,
+    //"editor.formatOnSave": true,
     // // 代码提示是默认选择提示给出的首选项而不是最近选择项
     // "editor.suggestSelection": "first",
     // 在终端显示远程连接窗口
@@ -105,12 +110,12 @@
         "--ignore=E231,E501,W291,W292,W391"
     ],
     // 使用yapf作为python的格式化工具
-    "python.formatting.provider": "yapf",
+    //"python.formatting.provider": "yapf",
     // JS
-    "javascript.updateImportsOnFileMove.enabled": "always",
+   // "javascript.updateImportsOnFileMove.enabled": "always",
     // 允许在 js 中使用 html emment 语法
-    "emmet.includeLanguages": {
-        "javascript": "html"
-    },
+   // "emmet.includeLanguages": {
+   //     "javascript": "html"
+   // },
     "terminal.integrated.inheritEnv": false
 }
