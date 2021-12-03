@@ -69,3 +69,6 @@ vim a.txt b.txt    同时编辑两个文件
 19. git stash list  #展示所有打包的脏改动
 20. git stash pop stash@{数字}  #回复某个脏包到工作区
 21. git stash drop stash@{数字}  #删除某个脏包
+
+22. git rebase -i HEAD~x  #修改前面x次提交的commit内容 把pick改成edit,保存退出
+接下来终端提示git commit --amend 修改commit的内容，然后git rebase --continue，再提交git push.
