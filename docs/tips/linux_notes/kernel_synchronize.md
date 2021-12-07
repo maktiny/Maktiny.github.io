@@ -306,11 +306,19 @@ struct swait_queue_head {
 ### 禁止和激活可延迟函数（软中断和tasklet）
  
  ```
+<<<<<<< HEAD
     local_bh_enable() //打开可延迟函数，当preempt_count字段中的硬中断和软终端计数器
                       //都为0,并且有软中断挂起，调用do_softirq()打开软中断。
 
 
     local_bh_disable() //禁止可延迟函数
+=======
+    local_bh_enable() //打开软中断，当preempt_count字段中的硬中断和软终端计数器
+                      //都为0,并且有软中断挂起，调用do_softirq()打开软中断。
+
+
+    local_bh_disable()
+>>>>>>> 974c71dd71c7c3f01a873bd001d8033f6c471b66
 
  ```
 
