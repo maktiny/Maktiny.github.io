@@ -4,6 +4,9 @@
 # 先qemu运行kernel
 ```
 qemu-system-x86_64 -s -S -kernel arch/x86_64/boot/bzImage -boot c -m 2048M -hda buildroot/output/images/rootfs.ext2 -append "root=/dev/sda rw console=ttyS0,115200 acpi=off nokaslr" -serial stdio -display none
+
+//没有安装Root file system系统
+qemu-system-x86_64 -s -S -no-kvm -kernel arch/x86/boot/bzImage -hda /dev/zero -append "root=/dev/zero console=ttyS0 nokaslr" -serial stdio -display none
 ```
 
 ## 另一终端运行gdb
@@ -49,5 +52,10 @@ Attaching 1 probe...
     ret_from_fork+34
 ]: 1
 @[
+
+export ALL_PROXY=socks5://localhost:1089
+export http_proxy=socks5://localhost:1089
+export https_proxy=http://localhost:8889
+
 
 ```
