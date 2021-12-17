@@ -1,0 +1,54 @@
+/* target_latx_host() 
+ * ---------------------------------------
+ * |  tr_disasm()
+ * |  -----------------------------------
+ * |  |  ir1_disasm() <--get_ir1_list() -->该函数有个do-while循环反汇编整个TB
+ * |  -----------------------------------
+ * |  tr_translate_tb()
+ * |  -----------------------------------
+ * |  |  tr_init()
+ * |  |  tr_ir2_generate()
+ * |  |  --------------------------------
+ * |  |  |  tr_init_for_each_ir1_in_tb()
+ * |  |  |  ir1_translate(pir1) //call translate_xx function */
+ * |  |  --------------------------------
+ * |  |  tr_ir2_optimize()
+ * |  |  tr_ir2_assemble()
+ * |  |  tr_fini()
+ * |  -----------------------------------
+ * --------------------------------------- */
+ 
+ qemu 中的 tb_gen_code()函数调用 target_latx_host(),
+ 
+ TranslationBlock *tb_gen_code(CPUState *cpu,
+                              target_ulong pc, target_ulong cs_base,
+                              uint32_t flags, int cflags)
+{
+
+  .............................
+  
+  gen_code_size = target_latx_host(env, tb);
+  
+  ..............................
+  
+}
+
+latx 使用qemu框架，但是摒弃了TCG, 直接使用ir1 -----> ir2的翻译。
+
+                              cpu_loop()  for(;;){}
+                              |
+                              -----cpu_exec()
+                                     |
+                                     -----tb_find()
+                                     |        |
+                                     |        -----tb_gen_code()
+                                     |               |
+                                     |               ------target_latx_host()
+                                     | 
+                          cpu_loop_exec_tb()
+                         
+                         
+                         
+
+
+

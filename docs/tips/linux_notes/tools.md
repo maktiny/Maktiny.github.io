@@ -72,3 +72,28 @@ vim a.txt b.txt    同时编辑两个文件
 
 22. git rebase -i HEAD~x  #修改前面x次提交的commit内容 把pick改成edit,保存退出
 接下来终端提示git commit --amend 修改commit的内容，然后git rebase --continue，再提交git push.
+
+
+23. git rm -r --cache . #删除远程仓库.根目录下的所有文件。
+24. 为了合并安全的开发建议做法
+
+```
+ git checkout -b name #搞一个新分支
+   
+   ------开发
+ 
+ git add 修改的文件
+
+ git commit -s #写提交注释
+
+ git log   #复制commit ID
+
+ git checkout master #切回主分支
+
+ git cherry-pick commit ID
+
+ git push origin HEAD:refs/for/master
+
+
+
+```
