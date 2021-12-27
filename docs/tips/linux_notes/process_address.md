@@ -44,7 +44,7 @@ do_munmap() # 释放线性地址空间
    ------unmap_region( ) #遍历线性区链表，并释放页框
 ```
 ## 缺页异常
-```
+```c
 static __always_inline void
 handle_page_fault(struct pt_regs *regs, unsigned long error_code,
 			      unsigned long address)
@@ -92,7 +92,7 @@ do_kern_addr_fault()                          do_user_addr_fault()   #处理用�
 ```
 
 ## 请求调页
-```
+```c
                                              handle_pte_fault()
                                                     |
                                                     |
@@ -102,21 +102,34 @@ do_kern_addr_fault()                          do_user_addr_fault()   #处理用�
                                               -----wp_page_copy() 
                                               
  
-``` 
-## 创建进程的地址空间
 ```
+## 创建进程的地址空间
+```c
 clone() ,fork(), vfork()的系统调用都是
 调用系统函数——kernel_clone()
-
+   fork()         vfork()     clone()
+    |              |            |
+    -----------------------------
+    |
    kernel_clone()
         |
         ----copy_process() #创建(复制)子进程
-               |
-               ---copy_mm()  #把父进程的地址空间复制给子进程
-                     |
-                     ---dup_mm()
-                         |
-                         ---dum_mmap() 
+        |       |
+        |       -----dup_task_struct() #分配一个task_struct数据结构
+        |       ---sched_fork()调度相关的初始化
+        |       ---copy_mm()  #把父进程的地址空间复制给子进程
+        |             |
+        |            ---dup_mm()
+        |                 |
+        |                 ---dum_mmap() //复制父进程的页表到子进程
+        |                      |
+        |                      ----vm_area_dup()//为子进程创建一个VMA
+        |                      ----__vm_link_rb()//把创建的VMA插入到子进程的mm中
+        |                      ----copy_page_range()//复制父进程的页表项
+        |
+        |---------copy_thread()//函数复制父进程的struct pt_regs(段寄存器的值)栈框到子进程的栈框，
+        |        在该函数设置childregs->ax = 0,fork()通过设置返回寄存器ax的这种方式，实现子进程返回0，父进程返回子进程PID。
+        |----  wake_up_new_task()//唤醒进程，加入到调度队列
 
 ```
 
@@ -127,6 +140,5 @@ clone() ,fork(), vfork()的系统调用都是
 
 ## heap 堆的管理
    sys_brk()系统调
-
 
 ## 
