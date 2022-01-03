@@ -11,8 +11,7 @@
             ----------------------------------
             |                                 |
     get_page_from_freelist() 失败------>    __alloc_pages_slowpath()
-
-         |
+         |
         rmqueue()
            |
         __rmqueue()
@@ -20,8 +19,7 @@
         __rmqueue_fallback()
             |
     steal_suitable_fallback()
-
-           |
+           |
 boost_watermark()//设置ZONE_BOOSTED_WATERMARK标志位
 回退到rmqueue()的时候，早点唤醒kswapd线程
 
@@ -175,7 +173,7 @@ scan_get_next_rmap_item()                     cmp_and_merge_page(page, rmap_item
 
 ### 匿名线性区anon_vma
 1. 为了从物理页面的page数据结构中找到所映射的PTE页表项，所创立的结构体。 
-```c
+```
 struct anon_vma {
 	struct anon_vma *root;		/* Root of this anon_vma tree */
 	struct rw_semaphore rwsem;	/* W: modification, R: walking the list */
