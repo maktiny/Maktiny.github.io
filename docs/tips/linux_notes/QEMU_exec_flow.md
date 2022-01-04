@@ -108,7 +108,7 @@ do/while获取顺序锁，然后使用qht_do_lookup()获取指向tb的指针。
 #### cpu_tb_exec()
 
 1. tcg_qemu_tb_exec(CPUArchState , TranslationBlock) //负责执行tb
-2. 如果是last_tb，该tb是NULL,不执行，只是保存guest PC。
+2. 如果last_tb不是退出tb，则将当前PC指向last_tb，顺着tb链往下执行。
 
 ```
  #ifdef CONFIG_LATX
@@ -127,5 +127,4 @@ do/while获取顺序锁，然后使用qht_do_lookup()获取指向tb的指针。
 ####  tcg_qemu_tb_exec()
 
 1. qemu的执行tb函数
-
 

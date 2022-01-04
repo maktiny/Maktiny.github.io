@@ -2,7 +2,7 @@
 ## shell 
 1. find . -name "*.c" | xargs rm -rfv  批量刪除當前目錄下的.c文件
 2. grep -rn "内容" 路径  #遍历路径下的所有文件，字符串匹配" "中的内容
-3. 
+3. grep -rn  "sel" . | wc -l    #对匹配计数
 4. 
 5. 
 6. 

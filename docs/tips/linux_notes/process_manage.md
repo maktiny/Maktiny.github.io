@@ -288,6 +288,267 @@ __schedule()
 
 ```
 
-#### 调度节拍
+#### 调度节拍（周期性调度）  scheduler_tick()
 
-1. 
+```c
+#0  scheduler_tick () at kernel/sched/core.c:5196
+#1  0xffffffff81142d3b in update_process_times (user_tick=0) at kernel/time/timer.c:1790
+#2  0xffffffff8115317b in tick_periodic (cpu=cpu@entry=0) at ./arch/x86/include/asm/ptrace.h:136
+#3  0xffffffff811531f5 in tick_handle_periodic (dev=0xffffffff830dd980 <i8253_clockevent>) at kernel/time/tick-common.c:112
+#4  0xffffffff8103ac98 in timer_interrupt (irq=<optimized out>, dev_id=<optimized out>) at arch/x86/kernel/time.c:57
+#5  0xffffffff8111db32 in __handle_irq_event_percpu (desc=desc@entry=0xffff888003dc8c00, flags=flags@entry=0xffffc90000003f54) at kernel/irq/handle.c:156
+#6  0xffffffff8111dc83 in handle_irq_event_percpu (desc=desc@entry=0xffff888003dc8c00) at kernel/irq/handle.c:196
+#7  0xffffffff8111dd0b in handle_irq_event (desc=desc@entry=0xffff888003dc8c00) at kernel/irq/handle.c:213
+#8  0xffffffff8112207e in handle_level_irq (desc=0xffff888003dc8c00) at kernel/irq/chip.c:653
+#9  0xffffffff810395e3 in generic_handle_irq_desc (desc=0xffff888003dc8c00) at ./include/linux/irqdesc.h:158
+#10 handle_irq (regs=<optimized out>, desc=0xffff888003dc8c00) at arch/x86/kernel/irq.c:231
+#11 __common_interrupt (regs=<optimized out>, vector=48) at arch/x86/kernel/irq.c:250
+#12 0xffffffff81c03035 in common_interrupt (regs=0xffffffff82e03e08, error_code=<optimized out>) at arch/x86/kernel/irq.c:240
+#13 0xffffffff81e00cde in asm_common_interrupt () at ./arch/x86/include/asm/idtentry.h:629
+#14 0xffffffff82e1a110 in envp_init ()
+
+
+
+             scheduler_tick() //周期调度
+              |-- update_rq_clock() //更新当前cpu就绪队列的时钟计数
+              |
+              |--task_tick()//使用相应调度类注册的如：task_tick_fair()
+              |      |
+              |      task_tick_fair()//遍历每个调度实体shced_entity
+              |           |
+              |        entity_tick()//将该进程的vruntime与就绪队列红黑树中最左边的进程的vruntime比较，看是否需要出发调度
+              |            |--update_curr(cfs_rq);//更新当前就绪队列的vruntime
+              |            |
+              |            |--update_load_avg()//更新负载
+              |            |
+              |            |--check_preempt_tick()//检查当前进程是否需要调度delta_exec > idle_runtime，需要调度
+              |               //通过resched_curr()设置thread_info为TIF_NEED_RESCHED
+              |
+              |
+              |--trigger_load_balance(rq);//触发负载均衡
+
+      
+```
+
+#### 组调度机制
+
+1. CFS的调度粒度是进程，组调度的粒度是用户组task_group
+2. 组调度属于cgroup架构中cpu的子系统。
+
+
+```c
+struct task_group {
+	struct cgroup_subsys_state css;
+
+#ifdef CONFIG_FAIR_GROUP_SCHED
+	/* schedulable entities of this group on each CPU */
+	struct sched_entity	**se;
+	/* runqueue "owned" by this group on each CPU */
+	struct cfs_rq		**cfs_rq;
+	unsigned long		shares;
+
+	/* A positive value indicates that this is a SCHED_IDLE group. */
+	int			idle;
+----------------------------------
+
+#endif
+
+#ifdef CONFIG_RT_GROUP_SCHED
+	struct sched_rt_entity	**rt_se;
+	struct rt_rq		**rt_rq;
+
+	struct rt_bandwidth	rt_bandwidth;
+#endif
+
+	struct rcu_head		rcu;
+	struct list_head	list;
+
+	struct task_group	*parent;
+	struct list_head	siblings;
+	struct list_head	children;
+
+	struct cfs_bandwidth	cfs_bandwidth;
+----------------------------------------------
+#ifdef CONFIG_UCLAMP_TASK_GROUP
+	/* The two decimal precision [%] value requested from user-space */
+	unsigned int		uclamp_pct[UCLAMP_CNT];
+	/* Clamp values requested for a task group */
+	struct uclamp_se	uclamp_req[UCLAMP_CNT];
+	/* Effective clamp values used for a task group */
+	struct uclamp_se	uclamp[UCLAMP_CNT];
+#endif
+
+};
+
+            shced_create_group()//创建一个组调度
+             |
+             |--alloc_rt_sched_group()//创建实时调度所需的组调度结构
+             |
+             |--alloc_fair_sched_group()//创建CFS所需的组调度结构
+                |----init_cfs_rq() //初始化就绪队列
+                |---init_tg_cfs_entry()//初始化组调度相关参数。
+
+```
+
+#### SMP负载均衡
+
+1. 内核对CPU的管理通过位图bitmap
+
+```
+ // 表示可运行的cpu核数
+#define cpu_possible_mask ((const struct cpumask *)&__cpu_possible_mask)
+//表示正在运行的cpu核数
+#define cpu_online_mask   ((const struct cpumask *)&__cpu_online_mask)
+//表示可处于运行态的核数(有些核被热插拔)
+#define cpu_present_mask  ((const struct cpumask *)&__cpu_present_mask)
+//表示活跃的核数
+#define cpu_active_mask   ((const struct cpumask *)&__cpu_active_mask)
+#define cpu_dying_mask    ((const struct cpumask *)&__cpu_dying_mask)
+
+
+start_kernel --> arch_call_rest_init()-->rest_init()--->kernel_init()---> 
+-->kernel_init_freeable()--->smp_init()-->smp_cpus_done()//激活cpu并设置cpu_active_mask中;
+
+
+```
+
+##### CPU的调度域
+1. 调度组是负载均衡的最小单位，在最底层的调度域中通常一个调度组描述一个CPU
+
+```
+start_kernel --> arch_call_rest_init()-->rest_init()--->kernel_init()---> 
+-->kernel_init_freeable()--->sched_init_smp()-->sched_init_domains()
+
+
+//调度组
+struct sched_group {
+	struct sched_group	*next;			/* Must be a circular list */
+	atomic_t		ref;
+
+	unsigned int		group_weight;
+	struct sched_group_capacity *sgc;
+	int			asym_prefer_cpu;	/* CPU of highest priority in group */
+
+	/*
+	 * The CPUs this group covers.
+	 *
+	 * NOTE: this field is variable length. (Allocated dynamically
+	 * by attaching extra space to the end of the structure,
+	 * depending on how many CPUs the kernel has booted up with)
+	 */
+	unsigned long		cpumask[];
+};
+
+ //调度域描述符
+struct sched_domain {
+	/* These fields must be setup */
+	struct sched_domain __rcu *parent;	/* top domain must be null terminated */
+	struct sched_domain __rcu *child;	/* bottom domain must be null terminated */
+	struct sched_group *groups;	/* the balancing groups of the domain */
+	unsigned long min_interval;	/* Minimum balance interval ms */
+	unsigned long max_interval;	/* Maximum balance interval ms */
+	unsigned int busy_factor;	/* less balancing by factor if busy */
+	unsigned int imbalance_pct;	/* No balance until over watermark */
+	unsigned int cache_nice_tries;	/* Leave cache hot tasks for # tries */
+
+	int nohz_idle;			/* NOHZ IDLE status */
+	int flags;			/* See SD_* */
+	int level;
+
+	/* Runtime fields. */
+	unsigned long last_balance;	/* init to jiffies. units in jiffies */
+	unsigned int balance_interval;	/* initialise to 1. units in ms. */
+	unsigned int nr_balance_failed; /* initialise to 0 */
+
+	/* idle_balance() stats */
+	u64 max_newidle_lb_cost;
+	unsigned long next_decay_max_lb_cost;
+
+	u64 avg_scan_cost;		/* select_idle_sibling */
+
+#ifdef CONFIG_SCHEDSTATS
+	/* load_balance() stats */
+	unsigned int lb_count[CPU_MAX_IDLE_TYPES];
+	unsigned int lb_failed[CPU_MAX_IDLE_TYPES];
+	unsigned int lb_balanced[CPU_MAX_IDLE_TYPES];
+	unsigned int lb_imbalance[CPU_MAX_IDLE_TYPES];
+	unsigned int lb_gained[CPU_MAX_IDLE_TYPES];
+	unsigned int lb_hot_gained[CPU_MAX_IDLE_TYPES];
+	unsigned int lb_nobusyg[CPU_MAX_IDLE_TYPES];
+	unsigned int lb_nobusyq[CPU_MAX_IDLE_TYPES];
+
+	/* Active load balancing */
+	unsigned int alb_count;
+	unsigned int alb_failed;
+	unsigned int alb_pushed;
+
+	/* SD_BALANCE_EXEC stats */
+	unsigned int sbe_count;
+	unsigned int sbe_balanced;
+	unsigned int sbe_pushed;
+
+	/* SD_BALANCE_FORK stats */
+	unsigned int sbf_count;
+	unsigned int sbf_balanced;
+	unsigned int sbf_pushed;
+
+	/* try_to_wake_up() stats */
+	unsigned int ttwu_wake_remote;
+	unsigned int ttwu_move_affine;
+	unsigned int ttwu_move_balance;
+#endif
+#ifdef CONFIG_SCHED_DEBUG
+	char *name;
+#endif
+	union {
+		void *private;		/* used during construction */
+		struct rcu_head rcu;	/* used during destruction */
+	};
+	struct sched_domain_shared *shared;
+
+	unsigned int span_weight;
+	/*
+	 * Span of all CPUs in this domain.
+	 *
+	 * NOTE: this field is variable length. (Allocated dynamically
+	 * by attaching extra space to the end of the structure,
+	 * depending on how many CPUs the kernel has booted up with)
+	 */
+	unsigned long span[];
+};
+
+
+```
+
+2. 
+```
+//用来描述CPU的层次关系的描述符
+struct sched_domain_topology_level {
+	sched_domain_mask_f mask; //cpu位图掩码
+	sched_domain_flags_f sd_flags;
+	int		    flags;
+	int		    numa_level;
+	struct sd_data      data;
+#ifdef CONFIG_SCHED_DEBUG
+	char                *name;
+#endif
+};
+
+//用一个数组来概括CPU的物理域的层次结构
+static struct sched_domain_topology_level default_topology[] = {
+#ifdef CONFIG_SCHED_SMT //超线程SMT，其使用相同的CPU资源，共享L1级缓存
+	{ cpu_smt_mask, cpu_smt_flags, SD_INIT_NAME(SMT) },
+#endif
+#ifdef CONFIG_SCHED_MC //多核MC， 每个物理核心共享L1级缓存
+	{ cpu_coregroup_mask, cpu_core_flags, SD_INIT_NAME(MC) },
+#endif
+	{ cpu_cpu_mask, SD_INIT_NAME(DIE) }, //处理器级别
+	{ NULL, },
+};
+
+cpu_smt_mask() //SMT层级的cpu位图的组成方式
+cpu_coregroup_mask()//MC
+cpu_cpu_mask() //DIE
+
+```
+
