@@ -1,7 +1,7 @@
 ### 文件预读
 1. 预读算法维护两个窗口，当前窗口和预读窗口，预读窗口内的页(还在传输中的页)紧挨着当前窗口内的页
 2. 当顺序读时，启动文件预读算法。
-```
+```c
 struct file_ra_state {
 	pgoff_t start; //当前窗口的第一页的索引
 	unsigned int size;// 当前窗口的页数
@@ -17,7 +17,7 @@ struct file_ra_state {
 
 ###
 
-```
+```c
 
  //kiocb 用来跟踪同步和异步IO操作的完成状态
 struct kiocb {

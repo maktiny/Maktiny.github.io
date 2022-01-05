@@ -133,7 +133,7 @@ static inline int dl_policy(int policy)
 ```
 2. 调度类的操作方法集(sched_class封装了调度类的相关方法)
 
-```
+```c
 struct sched_class {
 
 #ifdef CONFIG_UCLAMP_TASK
@@ -394,7 +394,7 @@ struct task_group {
 
 1. 内核对CPU的管理通过位图bitmap
 
-```
+```c
  // 表示可运行的cpu核数
 #define cpu_possible_mask ((const struct cpumask *)&__cpu_possible_mask)
 //表示正在运行的cpu核数
@@ -415,11 +415,14 @@ start_kernel --> arch_call_rest_init()-->rest_init()--->kernel_init()--->
 ##### CPU的调度域
 1. 调度组是负载均衡的最小单位，在最底层的调度域中通常一个调度组描述一个CPU
 
-```
+```c
 start_kernel --> arch_call_rest_init()-->rest_init()--->kernel_init()---> 
--->kernel_init_freeable()--->sched_init_smp()-->sched_init_domains()
+-->kernel_init_freeable()--->sched_init_smp()-->sched_init_domains()--build_sched_domains()-->主要的构造调度域的函数
 
-
+    build_sched_domains()
+       |---__visit_domain_allocation_hell()--__sdt_alloc()分配shced_domain,sched_group等数据结构
+       |---build_sched_domain()构建调度域
+       |--build_sched_group()构建调度组
 //调度组
 struct sched_group {
 	struct sched_group	*next;			/* Must be a circular list */
@@ -521,7 +524,7 @@ struct sched_domain {
 ```
 
 2. 
-```
+```c
 //用来描述CPU的层次关系的描述符
 struct sched_domain_topology_level {
 	sched_domain_mask_f mask; //cpu位图掩码
@@ -534,7 +537,7 @@ struct sched_domain_topology_level {
 #endif
 };
 
-//用一个数组来概括CPU的物理域的层次结构
+//用一个数组来概括CPU的物理域的层次结构,每个CPU都有一套SDTL调度域
 static struct sched_domain_topology_level default_topology[] = {
 #ifdef CONFIG_SCHED_SMT //超线程SMT，其使用相同的CPU资源，共享L1级缓存
 	{ cpu_smt_mask, cpu_smt_flags, SD_INIT_NAME(SMT) },
@@ -549,6 +552,30 @@ static struct sched_domain_topology_level default_topology[] = {
 cpu_smt_mask() //SMT层级的cpu位图的组成方式
 cpu_coregroup_mask()//MC
 cpu_cpu_mask() //DIE
+    
+    scheduler_tick()
+    |
+    -------trigger_load_balance  # 设置标志位，触发负载均衡
 
+open_softirq()
+  |
+run_rebalance_doamins()
+  |
+rebalance_domains()    # 确定调用——load_balance()的频率
+    |
+    -------load_balance()
+              |---should_we_balance()//是否需要进行负载均衡
+              |
+              |--find_busiest_group()//查找调度域中最繁忙的调度组
+              |
+              |
+              |---find_busiest_queue()//查找刚刚找到的调度组中最繁忙的就绪队列
+              ---------detach_tasks()  #把需要迁移的进程从本地runqueue剥离
+              |
+              --------attach_tasks() # 注册到目的CPU的runqueue
+              |
+              ---------——sched_move_tasks() #修改迁移进程所属的cgroup,然后进行进程调度，使原来task_runing的进程在目的CPU运行起来
+
+              #负载均衡完成
 ```
 
