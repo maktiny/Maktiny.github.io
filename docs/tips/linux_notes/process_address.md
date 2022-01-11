@@ -9,6 +9,10 @@ scheduler_tick()
     |
     -------trigger_load_balance  # 设置标志位，触发负载均衡
 
+open_softirq()
+  |
+run_rebalance_doamins()
+  |
 rebalance_domains()    # 确定调用——load_balance()的频率
     |
     -------load_balance()
@@ -24,7 +28,7 @@ rebalance_domains()    # 确定调用——load_balance()的频率
 ```
 
 ## 线性地址空间
-```
+```c
 mm_alloc() 获得新的内存描述符 mm_struct
 void mmput(struct mm_struct *mm)
 {
