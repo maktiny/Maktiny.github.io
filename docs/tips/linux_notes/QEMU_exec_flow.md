@@ -1,6 +1,6 @@
 ### QEMU的执行流追踪
 
-```
+```c
 latx 使用qemu框架，但是摒弃了TCG, 直接使用ir1 -----> ir2的翻译。
 
                               cpu_loop()  for(;;){}
