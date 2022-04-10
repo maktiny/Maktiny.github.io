@@ -11,26 +11,45 @@
             ----------------------------------
             |                                 |
     get_page_from_freelist() 失败------>    __alloc_pages_slowpath()
-         |
-        rmqueue()
+
+         |
+        rmqueue()//当伙伴系统中大小为order的空闲链表分配完了，调用该函数从大的order中切出一块来分配。
            |
         __rmqueue()
             |
         __rmqueue_fallback()
             |
     steal_suitable_fallback()
-           |
+
+           |
 boost_watermark()//设置ZONE_BOOSTED_WATERMARK标志位
-回退到rmqueue()的时候，早点唤醒kswapd线程
-
-
-
+回退到rmqueue()的时候，早点唤醒kswapd线程,便于及时满足分配大内存快的需求。
 
 ```
-2. 页面分配按照zone的水位来管理，
+
+2. 内核使用pglist_data来管理内存节点，每个内存节点被分成多个zone，页面分配按照zone的水位来管理，
 * WMARK_MIN：内核预留的内存，通常情况下不用
 * WMARK_LOW：当zone的内存低于改值时，使用慢路径__alloc_pages_slowpath()
 * WMARK_HIGH: 内存充足。
+
+```
+/*
+ zonelist中是所有可用的zone链表，第一个节点最先选用，其他的是备选
+ 系统初始化的时候使用build_zonelist()函数建立zonelist
+
+ _zonerefs[0] 表示ZONE_NORMAL, zone_idx = 1,优先选择的zone。
+*/
+struct zonelist {
+	struct zoneref _zonerefs[MAX_ZONES_PER_ZONELIST + 1];
+};
+
+struct zoneref {
+	struct zone *zone;	/* Pointer to actual zone */
+	int zone_idx;		/* zone_idx(zoneref->zone) */ 
+};
+
+
+```
 
 ```
 struct page {
@@ -57,8 +76,26 @@ struct page {
   ----------------------------------------
     } _struct_page_alignment;
 
+```
+
+2. 释放页面
+* 释放页面的核心函数是_free_one_page()，该函数还可把空闲页面合并，之后放置到
+高一级的空闲链表中。
 
 ```
+free_page()--> __free_page()-->free_the_page()-->	__free_pages_ok()-->__free_one_page()
+
+
+
+__free_one_page (fpi_flags=6, migratetype=<optimized out>, order=10, zone=<optimized out>, pfn=<optimized out>, page=0xffffea0000560000) at mm/page_alloc.c:1063
+#1  __free_pages_ok (page=<optimized out>, order=<optimized out>, fpi_flags=fpi_flags@entry=6) at mm/page_alloc.c:1653
+#2  0xffffffff812bfe8b in __free_pages_core (page=<optimized out>, order=<optimized out>) at mm/page_alloc.c:1685
+#3  0xffffffff831fc611 in memblock_free_pages (page=<optimized out>, pfn=<optimized out>, order=<optimized out>) at mm/page_alloc.c:1745
+#4  0xffffffff831fe6f5 in __free_pages_memory (end=<optimized out>, start=<optimized out>) at mm/memblock.c:2007
+
+```
+
+
 
 ### KSM机制
 1. KSM 用于合并具有相同内容的物理主存页面以减少页面冗余。
@@ -85,7 +122,7 @@ https://blog.csdn.net/tiantao2012/article/details/80484209
 ，超过256,就把hlist扩展成为一个list，每个元素都是稳定红黑树的节点
 
 
-```
+```c
 
 SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 {
@@ -150,7 +187,7 @@ struct stable_node {
 
 5. KSM页面合并的过程
 
-```
+```c
                         ksm_init() 内核线程
                            |
                         ksm_scan_thread()
@@ -173,7 +210,7 @@ scan_get_next_rmap_item()                     cmp_and_merge_page(page, rmap_item
 
 ### 匿名线性区anon_vma
 1. 为了从物理页面的page数据结构中找到所映射的PTE页表项，所创立的结构体。 
-```
+```c
 struct anon_vma {
 	struct anon_vma *root;		/* Root of this anon_vma tree */
 	struct rw_semaphore rwsem;	/* W: modification, R: walking the list */
@@ -224,7 +261,7 @@ struct anon_vma_chain {
 
 2. 内核中的KSM页面，匿名页面，文件映射页面需要unmap,unmap的结构体rmap_walk_control
 
-```
+```c
 struct rmap_walk_control {
 	void *arg;
 	/*
@@ -259,7 +296,7 @@ try_to_unmap()-->rmap_walk()-->rmap_walk_anon() unmap的流程。
 2. 基于内存节点的页面回收机制可以解决：同一个内存节点不同zone中存在的页面的
 不同老化速度问题，也就是同一个程序的页面老化速度不同。
 
-```
+```c
  //LRU链表类型(内核中共有5中LRU链表 )
 #define LRU_ALL_FILE (BIT(LRU_INACTIVE_FILE) | BIT(LRU_ACTIVE_FILE)) //文件映射链表
 #define LRU_ALL_ANON (BIT(LRU_INACTIVE_ANON) | BIT(LRU_ACTIVE_ANON)) //匿名页面链表
@@ -371,7 +408,7 @@ typedef struct pglist_data {
 
 #### kswapd内核线程(页面回收)
 
-```
+```c
 //用于控制页面回收的参数
 struct scan_control {
 	/* How many pages shrink_list() should reclaim */
@@ -452,7 +489,7 @@ l_active和l_inactive链表中，剩余的是可以回收的项
 * 传统的LRU页面，匿名页面和文件映射页面
 * 非LRU页面， zsmalloc和virtio-blloon页面
 2. 用户进程地址空间的页面可以迁移，内核本身使用的页面不能迁移。
-```
+```c
                                   migrate_pages()系统调用
                                          |
                                   kernel_migrate_pages()获取内存节点，迁移的时候进程使用计数usage加一
@@ -487,7 +524,7 @@ l_active和l_inactive链表中，剩余的是可以回收的项
 
 3. 内核以页块来管理页的迁移属性 页块大小是HUGETLB_PAGE_ORDER=9 或者为10
 
-```
+```c
                                 __alloc_pages_direct_coompact()
                                               |
                                     try_to_compact_pages()//遍历内存节点中的zone,在每个zone中调用compact_zone_order()
@@ -559,7 +596,7 @@ enum migrate_mode {
 调用steal_suitable_fallback()实现，由于不是请求的页面类型，说明内核由页外碎片
 steal_suitable_fallback()设置ZONE_BOOSTED_WATERMARK标志位，提前唤醒kswapd内核线程。
 
-```
+```c
 static int fallbacks[MIGRATE_TYPES][3] = {
 	[MIGRATE_UNMOVABLE]   = { MIGRATE_RECLAIMABLE, MIGRATE_MOVABLE,   MIGRATE_TYPES },
 	[MIGRATE_MOVABLE]     = { MIGRATE_RECLAIMABLE, MIGRATE_UNMOVABLE, MIGRATE_TYPES },
