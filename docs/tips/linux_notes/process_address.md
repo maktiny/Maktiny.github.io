@@ -1,33 +1,6 @@
 # Process Address 
 
-## 进程调度
-
-## cpu负载均衡调度算法：调度域
-
-```
-scheduler_tick()
-    |
-    -------trigger_load_balance  # 设置标志位，触发负载均衡
-
-open_softirq()
-  |
-run_rebalance_doamins()
-  |
-rebalance_domains()    # 确定调用——load_balance()的频率
-    |
-    -------load_balance()
-              |
-              ---------detach_tasks()  #把需要迁移的进程从本地runqueue剥离
-              |
-              --------attach_tasks() # 注册到目的CPU的runqueue
-              |
-              ---------——sched_move_tasks() #修改迁移进程所属的cgroup,然后进行进程调度，使原来task_runing的进程在目的CPU运行起来
-
-              #负载均衡完成
-
-```
-
-## 线性地址空间
+## 进程线性地址空间
 ```c
 mm_alloc() 获得新的内存描述符 mm_struct
 void mmput(struct mm_struct *mm)
@@ -146,3 +119,31 @@ clone() ,fork(), vfork()的系统调用都是
    sys_brk()系统调
 
 ## 
+
+## 进程调度
+
+## cpu负载均衡调度算法：调度域
+
+```c
+scheduler_tick()
+    |
+    -------trigger_load_balance  # 设置标志位，触发负载均衡
+
+open_softirq()
+  |
+run_rebalance_doamins()
+  |
+rebalance_domains()    # 确定调用——load_balance()的频率
+    |
+    -------load_balance()
+              |
+              ---------detach_tasks()  #把需要迁移的进程从本地runqueue剥离
+              |
+              --------attach_tasks() # 注册到目的CPU的runqueue
+              |
+              ---------——sched_move_tasks() #修改迁移进程所属的cgroup,然后进行进程调度，使原来task_runing的进程在目的CPU运行起来
+
+              #负载均衡完成
+
+```
+

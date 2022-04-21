@@ -190,4 +190,63 @@ kmalloc-16         18176  18176     16  256    1 : tunables    0    0    0 : sla
 kmalloc-8          14336  14336      8  512    1 : tunables    0    0    0 : slabdata     28     28      0
 
 ```
+### vmalloc()
+1. kmalloc()分配的是(内核空间)物理地址连续的内存，能分配的空间较小，使用的是slab机制
+2. vmalloc()分配(内核空间)虚拟地址空间连续的内存,能分配的空间较大，要比kmalloc()慢
+3. malloc是c语言的函数，只能分配用户空间的内存。
+4. 
+
+```
+/*
+
+__vmalloc()的核心实现是__vmalloc_node_range()
+VMALLOC_START,可分配的起始地址：就是内核模块的结束地址 
+
+VMALLOC_END：可分配的结束地址：
+**/
+void *__vmalloc_node(unsigned long size, unsigned long align,
+			    gfp_t gfp_mask, int node, const void *caller)
+{
+	return __vmalloc_node_range(size, align, VMALLOC_START, VMALLOC_END,
+				gfp_mask, PAGE_KERNEL, 0, node, caller);
+}
+/*
+ * This is only for performance analysis of vmalloc and stress purpose.
+ * It is required by vmalloc test module, therefore do not use it other
+ * than that.
+ */
+#ifdef CONFIG_TEST_VMALLOC_MODULE
+EXPORT_SYMBOL_GPL(__vmalloc_node);
+#endif
+
+void *__vmalloc(unsigned long size, gfp_t gfp_mask)
+{
+	return __vmalloc_node(size, 1, gfp_mask, NUMA_NO_NODE,
+				__builtin_return_address(0));
+}
+EXPORT_SYMBOL(__vmalloc);
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
