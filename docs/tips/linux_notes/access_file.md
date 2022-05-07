@@ -85,6 +85,8 @@ typedef struct {
       磁盘 <----> 内核缓冲区 <----> 用户态地址空间  （两次拷贝）
 
 ```
+![2022-05-07 11-38-44 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1h1zouao9iqj30m50ei763.jpg)
+零拷贝技术 不单只有 sendfile，如 mmap、splice 和 直接I/O 等都是 零拷贝技
 2. 直接IO不经过内核缓冲区，用户态进程直接写回磁盘，这种方式性能回更高。 
 3. 直接IO使用 generic_file_direct_write()函数，该函数实际调用address_space结构体注册的direct_IO()函数
 4. 对于某些应用程序来说，它会有它自己的数据缓存机制，比如，它会将数据缓存

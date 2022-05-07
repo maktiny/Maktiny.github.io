@@ -76,7 +76,7 @@ vim a.txt b.txt    同时编辑两个文件
 
 23. git rm -r --cache . #删除远程仓库.根目录下的所有文件。
 24. 为了合并安全的开发建议做法
-
+ 
 ```
  git checkout -b name #搞一个新分支
    
@@ -94,6 +94,5 @@ vim a.txt b.txt    同时编辑两个文件
 
  git push origin HEAD:refs/for/master
 
-
-
 ```
+25. git reflog --date=iso #git reflog根本不遍历HEAD的祖先。它是HEAD所指向的一个顺序的提交列表可以很好的恢复误操作.
