@@ -306,21 +306,281 @@ struct swait_queue_head {
 ### 禁止和激活可延迟函数（软中断和tasklet）
  
  ```
-<<<<<<< HEAD
     local_bh_enable() //打开可延迟函数，当preempt_count字段中的硬中断和软终端计数器
                       //都为0,并且有软中断挂起，调用do_softirq()打开软中断。
 
 
     local_bh_disable() //禁止可延迟函数
-=======
-    local_bh_enable() //打开软中断，当preempt_count字段中的硬中断和软终端计数器
-                      //都为0,并且有软中断挂起，调用do_softirq()打开软中断。
-
-
-    local_bh_disable()
->>>>>>> 974c71dd71c7c3f01a873bd001d8033f6c471b66
-
  ```
+ 
+### 中断 IRQ
+1. 在内核中每条IRQ线使用irq_desc描述
+ ```c
+
+struct irq_desc {
+	struct irq_common_data	irq_common_data;
+	struct irq_data		irq_data;
+	unsigned int __percpu	*kstat_irqs;
+	irq_flow_handler_t	handle_irq;
+	struct irqaction	*action;	/* IRQ action list */
+  //action:中断信号的处理入口。由于一条IRQ线可以被多个硬件共享，所以 action 是一个链表，每个 action 代表一个硬件的中断处理入口。
+	unsigned int		status_use_accessors;
+	unsigned int		core_internal_state__do_not_mess_with_it;
+	unsigned int		depth;		/* nested irq disables */
+	unsigned int		wake_depth;	/* nested wake enables */
+	unsigned int		tot_count;
+	unsigned int		irq_count;	/* For detecting broken IRQs */
+	unsigned long		last_unhandled;	/* Aging timer for unhandled count */
+	unsigned int		irqs_unhandled;
+	atomic_t		threads_handled;
+	int			threads_handled_last;
+	raw_spinlock_t		lock;
+	struct cpumask		*percpu_enabled;
+	const struct cpumask	*percpu_affinity;
+#ifdef CONFIG_SMP
+	const struct cpumask	*affinity_hint;
+	struct irq_affinity_notify *affinity_notify;
+#ifdef CONFIG_GENERIC_PENDING_IRQ
+	cpumask_var_t		pending_mask;
+#endif
+#endif
+	unsigned long		threads_oneshot;
+	atomic_t		threads_active;
+	wait_queue_head_t       wait_for_threads;
+#ifdef CONFIG_PM_SLEEP
+	unsigned int		nr_actions;
+	unsigned int		no_suspend_depth;
+	unsigned int		cond_suspend_depth;
+	unsigned int		force_resume_depth;
+#endif
+#ifdef CONFIG_PROC_FS
+	struct proc_dir_entry	*dir;
+#endif
+#ifdef CONFIG_GENERIC_IRQ_DEBUGFS
+	struct dentry		*debugfs_file;
+	const char		*dev_name;
+#endif
+#ifdef CONFIG_SPARSE_IRQ
+	struct rcu_head		rcu;
+	struct kobject		kobj;
+#endif
+	struct mutex		request_mutex;
+	int			parent_irq;
+	struct module		*owner;
+	const char		*name;
+} ____cacheline_internodealigned_in_smp;
 
 
 
+struct irqaction {
+	irq_handler_t		handler;//中断处理的入口函数，handler 的第一个参数是中断号，第二个参数是设备对应的ID，第三个参数是中断发生时由内核保存的各个寄存器的值
+	void			*dev_id;
+	void __percpu		*percpu_dev_id;
+	struct irqaction	*next;
+	irq_handler_t		thread_fn;
+	struct task_struct	*thread;
+	struct irqaction	*secondary;
+	unsigned int		irq;
+	unsigned int		flags;
+	unsigned long		thread_flags;
+	unsigned long		thread_mask;
+	const char		*name;
+	struct proc_dir_entry	*dir;
+} ____cacheline_internodealigned_in_smp;
+
+```
+
+2. 在内核中，可以通过__setup_irq() 函数来注册一个中断处理入口
+
+
+```c
+int setup_percpu_irq(unsigned int irq, struct irqaction *act)
+{
+	struct irq_desc *desc = irq_to_desc(irq);//通过中断号获取irq_desc结构体
+	int retval;
+
+	if (!desc || !irq_settings_is_per_cpu_devid(desc))
+		return -EINVAL;
+
+	retval = irq_chip_pm_get(&desc->irq_data);
+	if (retval < 0)
+		return retval;
+
+	retval = __setup_irq(irq, desc, act);
+
+	if (retval)
+		irq_chip_pm_put(&desc->irq_data);
+
+	return retval;
+}
+
+```
+3. 当一个中断发生时，中断控制层会发送信号给CPU，CPU收到信号会中断当前的执行，转而执行中断处理过程。中断处理过程首先会保存寄存器的值到栈中
+
+```c
+handle_irq_event()--->handle_irq_event_percpu()--->__handle_irq_event_percpu()----->然后调用中断注册时候action的处理函数进行中断处理
+```
+
+### softirq 机制
+1. 由于中断处理一般在关闭中断的情况下执行，所以中断处理不能太耗时，否则后续发生
+的中断就不能实时地被处理。鉴于这个原因，Linux把中断处理分为两个部分，上半部 和
+下半部.一般中断 上半部 只会做一些最基础的操作（比如从网卡中复制数据到缓存中），
+然后对要执行的中断 下半部 进行标识，标识完调用 do_softirq() 函数进行处理。
+2. softirq机制
+* 中断下半部 由 softirq（软中断） 机制来实现的
+* softirq_vec 数组是 softirq 机制的核心，softirq_vec 数组每个元素代表一种软中断
+* HI_SOFTIRQ 是高优先级tasklet，而 TASKLET_SOFTIRQ 是普通tasklet，tasklet是基于softirq机制的一种任务队列
+* NET_TX_SOFTIRQ 和 NET_RX_SOFTIRQ 特定用于网络子模块的软中断
+```c
+
+static struct softirq_action softirq_vec[NR_SOFTIRQS] __cacheline_aligned_in_smp;
+
+
+struct softirq_action
+{
+	void	(*action)(struct softirq_action *);
+};
+
+enum
+{
+	HI_SOFTIRQ=0,
+	TIMER_SOFTIRQ,
+	NET_TX_SOFTIRQ,
+	NET_RX_SOFTIRQ,
+	BLOCK_SOFTIRQ,
+	IRQ_POLL_SOFTIRQ,
+	TASKLET_SOFTIRQ,
+	SCHED_SOFTIRQ,
+	HRTIMER_SOFTIRQ,
+	RCU_SOFTIRQ,    /* Preferable RCU should always be the last softirq */
+
+	NR_SOFTIRQS
+};
+
+```
+3. 通过open_softirq()注册softirq处理函数
+* open_softirq() 函数的主要工作就是向 softirq_vec 数组添加一个softirq处理函数。
+```c
+
+void open_softirq(int nr, void (*action)(struct softirq_action *))
+{
+	softirq_vec[nr].action = action;
+}
+Linux在系统初始化时注册了两种softirq处理函数，分别为 TASKLET_SOFTIRQ 和 HI_SOFTIRQ
+void __init softirq_init(void)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		per_cpu(tasklet_vec, cpu).tail =
+			&per_cpu(tasklet_vec, cpu).head;
+		per_cpu(tasklet_hi_vec, cpu).tail =
+			&per_cpu(tasklet_hi_vec, cpu).head;
+	}
+
+	open_softirq(TASKLET_SOFTIRQ, tasklet_action);
+	open_softirq(HI_SOFTIRQ, tasklet_hi_action);
+}
+
+```
+4. 处理softirq
+```c
+
+asmlinkage __visible void do_softirq(void)
+{
+	__u32 pending;
+	unsigned long flags;
+
+	if (in_interrupt())
+		return;
+
+	local_irq_save(flags);
+
+	pending = local_softirq_pending();
+
+	if (pending && !ksoftirqd_running(pending))
+		do_softirq_own_stack();//宏展开最后调用__do_softirq()函数
+
+	local_irq_restore(flags);
+}
+
+```
+### tasklet机制
+1. tasklet机制是基于softirq机制的，tasklet机制其实就是一个任务队列，
+然后通过softirq执行。在Linux内核中有两种tasklet，一种是高优先级tasklet，一种是普通tasklet。这两种tasklet的实现基本一致，唯一不同的就是执行的优先级，高优先级tasklet会先于普通tasklet执行。
+
+```c
+
+struct tasklet_head {
+	struct tasklet_struct *head;
+	struct tasklet_struct **tail;
+};
+
+
+struct tasklet_struct
+{
+	struct tasklet_struct *next;
+	unsigned long state;
+	atomic_t count;
+	bool use_callback;
+	union {
+		void (*func)(unsigned long data);
+		void (*callback)(struct tasklet_struct *t);
+	};
+	unsigned long data;
+};
+
+```
+2. tasklet本质是一个队列，通过结构体 tasklet_head 存储，并且每个CPU有一个这样的队列 
+3. 	__tasklet_schedule_common()--->raise_softirq_irqoff()--->__raise_softirq_irqoff()设置相应的标志位，打开softirq,
+然后softirq_init初始化的时候注册tasklet_action函数会被执行
+
+```c
+//两个tasklet队列
+static DEFINE_PER_CPU(struct tasklet_head, tasklet_vec);
+static DEFINE_PER_CPU(struct tasklet_head, tasklet_hi_vec);
+
+
+//两个taskle队列的调度
+void __tasklet_schedule(struct tasklet_struct *t)
+{
+	__tasklet_schedule_common(t, &tasklet_vec,
+				  TASKLET_SOFTIRQ);
+}
+EXPORT_SYMBOL(__tasklet_schedule);
+
+void __tasklet_hi_schedule(struct tasklet_struct *t)
+{
+	__tasklet_schedule_common(t, &tasklet_hi_vec,
+				  HI_SOFTIRQ);
+}
+EXPORT_SYMBOL(__tasklet_hi_schedule);
+
+void __init softirq_init(void)
+{
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		per_cpu(tasklet_vec, cpu).tail =
+			&per_cpu(tasklet_vec, cpu).head;
+		per_cpu(tasklet_hi_vec, cpu).tail =
+			&per_cpu(tasklet_hi_vec, cpu).head;
+	}
+    ///softirq_init初始化的时候注册tasklet_action函数会被执行
+	open_softirq(TASKLET_SOFTIRQ, tasklet_action);
+	open_softirq(HI_SOFTIRQ, tasklet_hi_action);
+}
+
+
+
+static __latent_entropy void tasklet_action(struct softirq_action *a)
+{
+	tasklet_action_common(a, this_cpu_ptr(&tasklet_vec), TASKLET_SOFTIRQ);
+}
+
+static __latent_entropy void tasklet_hi_action(struct softirq_action *a)
+{
+	tasklet_action_common(a, this_cpu_ptr(&tasklet_hi_vec), HI_SOFTIRQ);
+}
+```
+4. tasklet_action_common()函数就是遍历tasklet_hi_vec或者tasklet_vec队列，执行其中的处理函数
