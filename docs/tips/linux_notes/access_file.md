@@ -69,7 +69,10 @@ typedef struct {
 * 共享型：在线性区页上的所有操作都会修改磁盘上的文件，对映射了同一文件的其他进程是可见的。
 * 私有型：为进程读文件创建的映射，写操作不会改变文件(写时复制)，为改变的页的内容会随着磁盘的内容而更新。
 
+### 缓存IO
+1. 缓存I/O 的引入是为了减少对块设备的 I/O 操作，但是由于读写操作都先要经过缓存，然后再从缓存复制到用户空间，所以多了一次内存复制操作
 
+![2022-05-08 19-39-43 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1h218cqzwxdj30mf0hf0wy.jpg)
 
 ### 直接IO传送
 1. 缓存IO传送经过中断和DMA进行,数据需要在内核缓冲和用户态进程页中互相拷贝。
@@ -94,7 +97,6 @@ typedef struct {
 这类应用程序就被称作是自缓存应用程序（ self-caching applications ）。数据库管理系统是这类应用程序的一个代表
 
 
-### 异步IO 
 
 #### glibc(POSIX AIO)版本的异步IO
 
@@ -131,10 +133,16 @@ struct aio_kiocb {
 ```
 
 #### linux 版本的异步IO
-1. 使用io_submit()系统调用开始异步IO之前先初始化异步IO环境
-2. linux kernel 5.14 中 io_submit()使用glibc的AIO借口aio_read()等函数实现
+1. 同步 IO 必须等待内核把 IO 操作处理完成后才返回。而异步 IO 不必等待 IO 操作完成，
+而是向内核发起一个 IO 操作就立刻返回，当内核完成 IO 操作后，会通过信号的方式通知应用程序
+2. Linux Native AIO 是 Linux 支持的原生 AIO,Linux存在很多第三方的异步 IO 库，如 libeio 和 glibc AIO
+3. 第三方的异步 IO 库都不是真正的异步 IO，而是使用多线程来模拟异步 IO，如 libeio 就是使用多线程来模拟异步 IO 的
+4.Linux 的异步 IO 操作主要由两个步骤组成：
+* 调用 io_setup 函数创建一个一般 IO 上下文。
+* 调用 io_submit 函数发起一个异步 IO 操作。
+* 调用 io_getevents 函数获取异步 IO 的结果。 
 
-```
+```c
 
                io_submit()
                    |
@@ -226,46 +234,35 @@ COND_SYSCALL(io_uring_register);
 */
 
 //用户态的异步IO描述符
-struct iocb {
-	/* these are internal to the kernel/libc. */
-	__u64	aio_data;	/* data to be returned in event's data */
+struct aio_kiocb {
+	union {
+		struct file		*ki_filp;
+		struct kiocb		rw;
+		struct fsync_iocb	fsync;
+		struct poll_iocb	poll;
+	};
 
-#if defined(__BYTE_ORDER) ? __BYTE_ORDER == __LITTLE_ENDIAN : defined(__LITTLE_ENDIAN)
-	__u32	aio_key;	/* the kernel sets aio_key to the req # */
-	__kernel_rwf_t aio_rw_flags;	/* RWF_* flags */
-#elif defined(__BYTE_ORDER) ? __BYTE_ORDER == __BIG_ENDIAN : defined(__BIG_ENDIAN)
-	__kernel_rwf_t aio_rw_flags;	/* RWF_* flags */
-	__u32	aio_key;	/* the kernel sets aio_key to the req # */
-#else
-#error edit for your odd byteorder.
-#endif
+	struct kioctx		*ki_ctx;
+	kiocb_cancel_fn		*ki_cancel;
 
-	/* common fields */
-	__u16	aio_lio_opcode;	/* see IOCB_CMD_ above */
-	__s16	aio_reqprio;
-	__u32	aio_fildes;
+	struct io_event		ki_res;
 
-	__u64	aio_buf;
-	__u64	aio_nbytes;
-	__s64	aio_offset;
-
-	/* extra parameters */
-	__u64	aio_reserved2;	/* TODO: use this for a (struct sigevent *) */
-
-	/* flags for the "struct iocb" */
-	__u32	aio_flags;
+	struct list_head	ki_list;	/* the aio core uses this
+						 * for cancellation */
+	refcount_t		ki_refcnt;
 
 	/*
-	 * if the IOCB_FLAG_RESFD flag of "aio_flags" is set, this is an
-	 * eventfd to signal AIO readiness to
+	 * If the aio_resfd field of the userspace iocb is not zero,
+	 * this is the underlying eventfd context to deliver events to.
 	 */
-	__u32	aio_resfd;
-}; /* 64 bytes */
-
-
-
-
-
+	struct eventfd_ctx	*ki_eventfd;
+};
+```
+5. 要使用 Linux 原生 AIO，首先需要创建一个异步 IO 上下文，在内核中，异步 IO 上下文使用 kioctx 结构表示
+6. 在 kioctx 结构中，比较重要的成员为 active_reqs 和 ring_info。active_reqs 
+保存了所有正在进行的异步 IO 操作，而 ring_info 成员用于存放异步 IO 操作的结果
+![2022-05-08 20-14-46 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1h219ehnvkqj30we0gg41i.jpg)
+```c
 //句柄aio_context_t指向kioctx 异步IO上下文
 //描述异步IO环境的数据结构kioctx
 struct kioctx {
@@ -342,6 +339,5 @@ struct kioctx {
 
 	unsigned		id;
 };
-
-
 ```
+
