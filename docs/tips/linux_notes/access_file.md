@@ -340,4 +340,143 @@ struct kioctx {
 	unsigned		id;
 };
 ```
+#### 共享内存
+1. 共享内存是通过将不同进程的虚拟内存地址映射到相同的物理内存地址来实现的
+2. 每个共享内存都由一个名为 struct shmid_kernel 的结构体来管理，而且Linux限制了系统最大能创建的共享内存为128个
+
+```c
+
+struct shmid_kernel /* private to the kernel */
+{
+	struct kern_ipc_perm	shm_perm;
+	struct file		*shm_file;
+	unsigned long		shm_nattch;
+	unsigned long		shm_segsz;
+	time64_t		shm_atim;
+	time64_t		shm_dtim;
+	time64_t		shm_ctim;
+	struct pid		*shm_cprid;
+	struct pid		*shm_lprid;
+	struct ucounts		*mlock_ucounts;
+
+	/* The task created the shm object.  NULL if the task is dead. */
+	struct task_struct	*shm_creator;
+	struct list_head	shm_clist;	/* list by creator */
+} __randomize_layout;
+
+shmid_ds 结构体用于管理共享内存的信息
+struct shmid_ds {
+	struct ipc_perm		shm_perm;	/* operation perms */
+	int			shm_segsz;	/* size of segment (bytes) */
+	__kernel_old_time_t	shm_atime;	/* last attach time */
+	__kernel_old_time_t	shm_dtime;	/* last detach time */
+	__kernel_old_time_t	shm_ctime;	/* last change time */
+	__kernel_ipc_pid_t	shm_cpid;	/* pid of creator */
+	__kernel_ipc_pid_t	shm_lpid;	/* pid of last operator */
+	unsigned short		shm_nattch;	/* no. of current attaches */
+	unsigned short 		shm_unused;	/* compatibility */
+	void 			*shm_unused2;	/* ditto - used by DIPC */
+	void			*shm_unused3;	/* unused */
+};
+```
+3. 要使用共享内存，首先需要调用 shmget()--->ksys_shmget() 函数来创建或者获取一块共享内存
+
+```c
+
+long ksys_shmget(key_t key, size_t size, int shmflg)
+{
+	struct ipc_namespace *ns;
+	static const struct ipc_ops shm_ops = {//注册shm函数
+		.getnew = newseg,//就是创建一个新的 struct shmid_kernel 结构体
+		.associate = security_shm_associate,
+		.more_checks = shm_more_checks,
+	};
+	struct ipc_params shm_params;
+
+	ns = current->nsproxy->ipc_ns;
+
+	shm_params.key = key;
+	shm_params.flg = shmflg;
+	shm_params.u.size = size;
+
+	return ipcget(ns, &shm_ids(ns), &shm_ops, &shm_params);
+}
+
+SYSCALL_DEFINE3(shmget, key_t, key, size_t, size, int, shmflg)
+{
+	return ksys_shmget(key, size, shmflg);
+}
+```
+
+4. shmat() 函数用于将共享内存映射到本地虚拟内存地址
+```c
+
+#define SHM_PATH "/tmp/shm"
+#define SHM_SIZE 128
+
+int main(int argc, char* argv[]){
+  int shmid;
+  char* addr;
+ /*系统建立IPC通讯（如消息队列、共享内存时）必须指定一个ID值 。通常情况下，该id值通过ftok函数得到 。  
+   key_t ftok( char * fname, int id )
+   参数说明：
+        fname就时您指定的文档名
+        id是子序号。
+  */
+  key_t key = ftok(SHM_PATH, 0x6666);
+  
+  /*
+   * 得到一个共享内存标识符或创建一个共享内存对象并返回共享内存标识符
+   *int shmget( key_t, size_t, flag);
+   * */
+  shmid = shmget(key, SHM_SIZE, IPC_CREAT|IPC_EXCL|0666);
+  if(shmid < 0){
+    printf("failed to create a share memory object\n");
+    return -1;
+  }
+
+  /**
+   *shmat（）是用来允许本进程访问一块共享内存的函数，与shmget（）函数共同使用。
+   *shmat的原型是：void *shmat（int shmid，const void *shmaddr,int shmflg）;
+   * 如果 shmaddr 是NULL，系统将自动选择一个合适的地址！ 如果shmaddr不是NULL 并且没有指定SHM_RND 则此段连接到addr所指定的地址上 
+   * shmat返回值是该段所连接的实际地址 如果出错返回-1
+   * */
+   addr = shmat(shmid, NULL, 0);
+   if(addr <= 0){
+     printf("failed to map share memory\n");
+     return -1;
+   }
+   /*向addr指定的地址写入内容(字符)，不包括字符串结束符*/
+   sprintf(addr, "%s", "hello world!\n");
+
+   return 0;
+}
+
+
+
+SYSCALL_DEFINE3(shmat, int, shmid, char __user *, shmaddr, int, shmflg)
+{
+	unsigned long ret;
+	long err;
+  /*
+    do_shmat()会调用do_mmap()获取一个vm_area_struct结构体，然后返回一个虚拟地址的addr，
+    物理空间的分配在缺页异常的时候会分配
+  **/
+	err = do_shmat(shmid, shmaddr, shmflg, &ret, SHMLBA);
+	if (err)
+		return err;
+	force_successful_syscall_return();
+	return (long)ret;
+}
+
+```
+
+
+
+
+
+
+
+
+
 

@@ -287,6 +287,239 @@ struct swait_queue_head {
  down() -------------- wait_for_completion()
 ```
 
+### 信号
+1. 在task_struct结构体中与信号相关的元素
+
+```c
+struct task_struct {
+  .....................................
+	struct signal_struct		*signal;
+	struct sighand_struct __rcu		*sighand;
+	sigset_t			blocked;
+	sigset_t			real_blocked;
+	/* Restored if set_restore_sigmask() was used: */
+	sigset_t			saved_sigmask;
+	struct sigpending		pending;
+...............................
+}
+
+struct signal_struct {
+	refcount_t		sigcnt;
+	atomic_t		live;
+	int			nr_threads;
+	struct list_head	thread_head;
+
+	wait_queue_head_t	wait_chldexit;	/* for wait4() */
+
+	/* current thread group signal load-balancing target: */
+	struct task_struct	*curr_target;
+
+	/* shared signal handling: */
+	struct sigpending	shared_pending;
+
+	/* For collecting multiprocess signals during fork */
+	struct hlist_head	multiprocess;
+
+........................
+}
+
+struct sigpending {
+	struct list_head list;//存储着进程接收到的信号队列,当进程接收到一个信号时，就需要把接收到的信号添加 pending 这个队列中
+	sigset_t signal;
+};
+
+struct sighand_struct {
+	spinlock_t		siglock;
+	refcount_t		count;
+	wait_queue_head_t	signalfd_wqh;
+	struct k_sigaction	action[_NSIG];//数组中的每个成员代表着相应信号的处理函数的信息
+};
+
+struct k_sigaction {
+	struct sigaction sa;
+#ifdef __ARCH_HAS_KA_RESTORER
+	__sigrestore_t ka_restorer;
+#endif
+};
+
+struct sigaction {
+#ifndef __ARCH_HAS_IRIX_SIGACTION
+	__sighandler_t	sa_handler;//其中 sa_handler 成员是类型为 __sighandler_t 的函数指针，代表着信号处理的方法。
+	unsigned long	sa_flags;
+#else
+	unsigned int	sa_flags;
+	__sighandler_t	sa_handler;
+#endif
+#ifdef __ARCH_HAS_SA_RESTORER
+	__sigrestore_t sa_restorer;
+#endif
+	sigset_t	sa_mask;	/* mask last for extensibility */
+};
+
+```
+2. 可以通过 kill() 系统调用发送一个信号给指定的进程，其原型如下：
+```c
+int kill (__pid_t __pid, int __sig) 
+
+///kill()系统调用使用内核函数sys_kill()
+SYSCALL_DEFINE2(kill, pid_t, pid, int, sig)
+{
+	struct kernel_siginfo info;
+
+	prepare_kill_siginfo(sig, &info);//初始化kernel_siginfo结构体
+
+	return kill_something_info(sig, &info, pid);
+}
+
+kill_something_info() 函数根据传入pid 的不同来进行不同的操作，有如下4中可能：
+
+pid 等于0时，表示信号将送往所有与调用 kill() 的那个进程属同一个使用组的进程。
+pid 大于零时，pid 是信号要送往的进程ID。
+pid 等于-1时，信号将送往调用进程有权给其发送信号的所有进程，除了进程1(init)。
+pid 小于-1时，信号将送往以-pid为组标识的进程
+
+
+kill_something_info() 最后会调用send_signal()-->__send_signal()把信号放到信号队列里去。
+```
+
+3. 内核触发信号处理函数是在arch_do_signal_or_restart()--->handle_signal()
+
+```c
+
+void arch_do_signal_or_restart(struct pt_regs *regs, bool has_signal)
+{
+	struct ksignal ksig;
+
+	if (has_signal && get_signal(&ksig)) {
+		/* Whee! Actually deliver the signal.  */
+		handle_signal(&ksig, regs);
+		return;
+	}
+  ..................................
+}
+```
+4. 信号处理程序是由用户提供的，所以信号处理程序的代码是在用户态的
+先返回到用户态执行信号处理程序，执行完信号处理程序后再返回到内核态，再在内核态完成收尾工作
+![2022-05-10 14-27-47 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1h23aoyun8ej30so0cxtbj.jpg)
+handle_signal()--->setup_rt_frame()--->ia32_setup_frame()函数来构建这个过程的(从用户态返回到内核态)运行环境（其实就是修改内核栈和用户栈相应的数据来完成）
+
+```c
+
+int ia32_setup_frame(int sig, struct ksignal *ksig,
+		     compat_sigset_t *set, struct pt_regs *regs)
+{
+	struct sigframe_ia32 __user *frame;
+	void __user *restorer;
+	void __user *fp = NULL;
+
+	/* copy_to_user optimizes that into a single 8 byte store */
+	static const struct {
+		u16 poplmovl;
+		u32 val;
+		u16 int80;
+	} __attribute__((packed)) code = {//调用系统调用sigreturn()返回内核态
+		0xb858,		 /* popl %eax ; movl $...,%eax */
+		__NR_ia32_sigreturn,
+		0x80cd,		/* int $0x80 */
+	};
+
+	frame = get_sigframe(ksig, regs, sizeof(*frame), &fp);
+
+	if (ksig->ka.sa.sa_flags & SA_RESTORER) {
+		restorer = ksig->ka.sa.sa_restorer;
+	} else {
+		/* Return stub is in 32bit vsyscall page */
+		if (current->mm->context.vdso)
+			restorer = current->mm->context.vdso +
+				vdso_image_32.sym___kernel_sigreturn;
+		else
+			restorer = &frame->retcode;
+	}
+
+	if (!user_access_begin(frame, sizeof(*frame)))
+		return -EFAULT;
+
+	unsafe_put_user(sig, &frame->sig, Efault);
+	unsafe_put_sigcontext32(&frame->sc, fp, regs, set, Efault);
+	unsafe_put_user(set->sig[1], &frame->extramask[0], Efault);
+	unsafe_put_user(ptr_to_compat(restorer), &frame->pretcode, Efault);
+	/*
+	 * These are actually not used anymore, but left because some
+	 * gdb versions depend on them as a marker.
+	 */
+	unsafe_put_user(*((u64 *)&code), (u64 __user *)frame->retcode, Efault);
+	user_access_end();
+
+	/* Set up registers for signal handler */
+	regs->sp = (unsigned long) frame;
+	regs->ip = (unsigned long) ksig->ka.sa.sa_handler;//调用注册好的信号处理函数
+
+	/* Make -mregparm=3 work */
+	regs->ax = sig;
+	regs->dx = 0;
+	regs->cx = 0;
+
+	loadsegment(ds, __USER32_DS);
+	loadsegment(es, __USER32_DS);
+
+	regs->cs = __USER32_CS;
+	regs->ss = __USER32_DS;
+
+	return 0;
+Efault:
+	user_access_end();
+	return -EFAULT;
+}
+
+```
+6.sigreturn() 要做的工作就是恢复原来内核栈的内容了 
+```c
+
+COMPAT_SYSCALL_DEFINE0(sigreturn)
+{
+	struct pt_regs *regs = current_pt_regs();
+	struct sigframe_ia32 __user *frame = (struct sigframe_ia32 __user *)(regs->sp-8);
+	sigset_t set;
+
+	if (!access_ok(frame, sizeof(*frame)))
+		goto badframe;
+	if (__get_user(set.sig[0], &frame->sc.oldmask)
+	    || __get_user(((__u32 *)&set)[1], &frame->extramask[0]))
+		goto badframe;
+
+	set_current_blocked(&set);
+
+	if (ia32_restore_sigcontext(regs, &frame->sc))///最重要的是调用 ia32_restore_sigcontext() 恢复原来内核栈的内容
+		goto badframe;
+	return regs->ax;
+
+badframe:
+	signal_fault(regs, frame, "32bit sigreturn");
+	return 0;
+}
+
+```
+7. 注册信号处理函数是在sys_signal()系统调用中处理
+
+```c
+
+
+SYSCALL_DEFINE2(signal, int, sig, __sighandler_t, handler)
+{
+	struct k_sigaction new_sa, old_sa;
+	int ret;
+
+	new_sa.sa.sa_handler = handler;//注册信号处理函数
+	new_sa.sa.sa_flags = SA_ONESHOT | SA_NOMASK;
+	sigemptyset(&new_sa.sa.sa_mask);
+
+	ret = do_sigaction(sig, &new_sa, &old_sa);//相关数据结构的初始
+
+	return ret ? ret : (unsigned long)old_sa.sa.sa_handler;
+}
+```
+
+
 
 ### 禁止本地中断
 1. 禁止本地中断并不保护运行在另一个CPU核上的中断
