@@ -1,16 +1,23 @@
 ## slab分配器
 1. 伙伴系统分配以页为单位，如果需要更小的内存分配使用slab,slab最终使用伙伴系统来
-分配物理页面，只不过alsb分配器在物理页面上实现自己的机制，然后管理小内存。
+分配物理页面，只不过slab分配器在物理页面上实现自己的机制，实现更细粒度管理内存。
 slab分配器在创建的不分配物理内存，只有在分配slab对象的时候，没有空闲对象的时候才分配物理内存
 2. slab机制创建了多层缓冲池：共享对象缓冲池和每个CPU对象缓冲池
-3. linux内核实现三种slab分配器机制
+3. 每个slab分配器只负责一种 类型的对象，比如anon_vma对象
+4. slab分配对象有三层结构
+* 仍然处于CPU高速缓存中的per_cpu对象
+* 现存slab中未使用的对象
+* 使用伙伴系统新分配的slab分配器中未使用的对象
+
+
+4. linux内核实现三种slab分配器机制
 * slab机制：一般的操作系统
 * slub机制：使用在大型系统中，性能比slab更好
 * slob机制：slob机制适合嵌入式系统
 
 
-```
-//创建slab描述符
+```c
+//创建slab分配器
 struct kmem_cache *
 kmem_cache_create(const char *name, unsigned int size, unsigned int align,
 		slab_flags_t flags, void (*ctor)(void *))
@@ -26,39 +33,98 @@ void kmem_cache_free(struct kmem_cache *s, void *x)
 
 
   //slab描述符
+
 struct kmem_cache {
-	struct kmem_cache_cpu __percpu *cpu_slab; //kmem_cache_cpu->freelist指向本地对象缓冲池（array_acche）
-	/* Used for retrieving partial slabs, etc. */
-	slab_flags_t flags;
-	unsigned long min_partial;
-	unsigned int size;	/* The size of an object including metadata */
-	unsigned int object_size;/* The size of an object without metadata */
-	struct reciprocal_value reciprocal_size;
-	unsigned int offset;	/* Free pointer offset */
-#ifdef CONFIG_SLUB_CPU_PARTIAL
-	/* Number of per cpu partial objects to keep around */
-	unsigned int cpu_partial;
+	struct array_cache __percpu *cpu_cache;
+
+/* 1) Cache tunables. Protected by slab_mutex */
+	unsigned int batchcount;
+	unsigned int limit;
+	unsigned int shared;
+
+	unsigned int size;
+	struct reciprocal_value reciprocal_buffer_size;
+/* 2) touched by every alloc & free from the backend */
+
+	slab_flags_t flags;		/* constant flags */
+	unsigned int num;		/* # of objs per slab */
+
+/* 3) cache_grow/shrink */
+	/* order of pgs per slab (2^n) */
+	unsigned int gfporder;
+
+	/* force GFP flags, e.g. GFP_DMA */
+	gfp_t allocflags;
+
+	size_t colour;			/* cache colouring range */
+	unsigned int colour_off;	/* colour offset */
+	struct kmem_cache *freelist_cache;
+	unsigned int freelist_size;
+
+	/* constructor func */
+	void (*ctor)(void *obj);
+
+/* 4) cache creation/removal */
+	const char *name;
+	struct list_head list;
+	int refcount;
+	int object_size;
+	int align;
+........................................
+	/*
+	 * If debugging is enabled, then the allocator can add additional
+	 * fields and/or padding to every object. 'size' contains the total
+	 * object size including these internal fields, while 'obj_offset'
+	 * and 'object_size' contain the offset to the user object and its
+	 * size.
+	 */
+	int obj_offset;
+#endif /* CONFIG_DEBUG_SLAB */
+
+#ifdef CONFIG_KASAN
+	struct kasan_cache kasan_info;
 #endif
-	struct kmem_cache_order_objects oo;
 
-	/* Allocation and freeing of slabs */
-	struct kmem_cache_order_objects max;
-	struct kmem_cache_order_objects min;
-	gfp_t allocflags;	/* gfp flags to use on each alloc */
-	int refcount;		/* Refcount for slab cache destroy */
-	void (*ctor)(void *);
-	unsigned int inuse;		/* Offset to metadata */
-	unsigned int align;		/* Alignment */
-	unsigned int red_left_pad;	/* Left redzone padding size */
-	const char *name;	/* Name (only for display!) */
-	struct list_head list;	/* List of slab caches */
-	
-.....................................
+#ifdef CONFIG_SLAB_FREELIST_RANDOM
+	unsigned int *random_seq;
+#endif
 
-  unsigned int useroffset;	/* Usercopy region offset */
+	unsigned int useroffset;	/* Usercopy region offset */
 	unsigned int usersize;		/* Usercopy region size */
 
 	struct kmem_cache_node *node[MAX_NUMNODES];
+};
+
+
+
+struct kmem_cache_node {
+	spinlock_t list_lock;
+
+#ifdef CONFIG_SLAB              //slab的三个链表
+	struct list_head slabs_partial;	/* partial list first, better asm code */
+	struct list_head slabs_full;
+	struct list_head slabs_free;
+	unsigned long total_slabs;	/* length of all slab lists */
+	unsigned long free_slabs;	/* length of free slab list only */
+	unsigned long free_objects;
+	unsigned int free_limit;
+	unsigned int colour_next;	/* Per-node cache coloring */
+	struct array_cache *shared;	/* shared per node */
+	struct alien_cache **alien;	/* on other nodes */
+	unsigned long next_reap;	/* updated without locking */
+	int free_touched;		/* updated without locking */
+#endif
+
+#ifdef CONFIG_SLUB
+	unsigned long nr_partial;
+	struct list_head partial;
+#ifdef CONFIG_SLUB_DEBUG
+	atomic_long_t nr_slabs;
+	atomic_long_t total_objects;
+	struct list_head full;
+#endif
+#endif
+
 };
 
 //缓冲池结构体(本地对象缓冲池 共享对象缓冲池)
@@ -75,7 +141,7 @@ struct array_cache {
 };
 ```
 4. 创建slab描述符(slab分配器)
- ```
+ ```c
     kmem_cache_create()
                 |
              kmem_cache_create_usercopy()
@@ -90,7 +156,7 @@ calculate_slab_order()函数用来计算slab分配器需要的页面数
 ```
 
 5. 分配slab对象
-```
+```c
    slab分配器创建slab对象的时候使用伙伴系统的借口分配物理页
    cache_alloc_refille()--->cache_grow_begin()--->kmem_getpages()--->__alloc_pages_node()分配物理页
 
@@ -101,10 +167,11 @@ calculate_slab_order()函数用来计算slab分配器需要的页面数
             __do_cache_alloc()//如果本地/共享对象缓冲池
             中存在空闲的对象，会直接分配，否则
                |
-              ____cache_alloc()
+              ____cache_alloc()//如果per-cpu的array_cache的entry[]数组中有未使用的对象，直接分配
                 |
-            cache_alloc_refill()//否则从其他slab节点（kmem_cache_node)和其共享对象缓冲池
-            中迁移一部分slab空闲对象到当前slab分配器进行分配，
+            cache_alloc_refill()//否则找到array_cache->batchcount个对象重新填充per-cpu缓存
+	    //（kmem_cache_node中:先扫描空闲链表-->部分空闲链表)和其共享对象缓冲池
+            //中迁移一部分slab空闲对象到当前slab分配器进行分配，
                 |
             cache_grow_begin()
             如果还是失败，则重新建一个slab分配器
@@ -114,7 +181,7 @@ calculate_slab_order()函数用来计算slab分配器需要的页面数
 
 6. 释放slab缓存对象
 
-```
+```c
      kmem_cache_free()
         |
       __cache_free()
@@ -128,7 +195,7 @@ calculate_slab_order()函数用来计算slab分配器需要的页面数
 7. slab的管理区（管理空闲对象）
 * slab管理区是一个数组freelist, 根据slab分配器的空间大小，管理区有三种分配方式
 
-```
+```c
 __kmem_cache_create()函数中的部分代码：
 /*
   freelist小于一个slab对象的大小，把slab最后一个对象的空间作为freelist
@@ -170,7 +237,7 @@ if (set_objfreelist_slab_cache(cachep, size, flags)) {
 * 内核的kmalloc()函数实际上就是slab的机制，分配多少2 ** order字节的空间
 
 
-```
+```c
 终端： cd /proc 
        sudo  cat  slabinfo
 就可以看到系统中salb信息
@@ -191,12 +258,51 @@ kmalloc-8          14336  14336      8  512    1 : tunables    0    0    0 : sla
 
 ```
 ### vmalloc()
-1. kmalloc()分配的是(内核空间)物理地址连续的内存，能分配的空间较小，使用的是slab机制
+1. kmalloc()分配的是(内核空间)物理地址连续的内存，能分配的空间较小，使用的是slab机制,与kfree配套使用,kmalloc使用slab机制实现(kmalloc_slab())
 2. vmalloc()分配(内核空间)虚拟地址空间连续的内存,能分配的空间较大，要比kmalloc()慢
 3. malloc是c语言的函数，只能分配用户空间的内存。
-4. 
+4. vmalloc的结构
+![vmalloc的分配过程和数据结构](https://blog.csdn.net/oqqYuJi12345678/article/details/122790045)
 
-```
+```c
+//内核在处理vmalloc的映射区的时候，使用vm_struct数据结构，记住与vm_area_struct区别开来
+//使用vmalloc分配的区域都用vm_struc描述,每两个vmalloc分配的区间之间留有一页大小的间隙(警戒页)
+struct vm_struct {
+	struct vm_struct	*next;
+	void			*addr;
+	unsigned long		size;
+	unsigned long		flags;
+	struct page		**pages;//指向一个page的指针数组，表示映射到虚拟地址空间的一个物理page
+#ifdef CONFIG_HAVE_ARCH_HUGE_VMALLOC
+	unsigned int		page_order;
+#endif
+	unsigned int		nr_pages;
+	phys_addr_t		phys_addr;
+	const void		*caller;
+};
+
+//所有vmalloc分配的区间都由vmlist管理
+static struct vm_struct *vmlist __initdata;
+//穿件虚拟区之前，需要构建vmap_area,
+struct vmap_area {
+	unsigned long va_start;
+	unsigned long va_end;
+
+	struct rb_node rb_node;         /* address sorted rbtree */
+	struct list_head list;          /* address sorted list */
+
+	/*
+	 * The following two variables can be packed, because
+	 * a vmap_area object can be either:
+	 *    1) in "free" tree (root is vmap_area_root)
+	 *    2) or "busy" tree (root is free_vmap_area_root)
+	 */
+	union {
+		unsigned long subtree_max_size; /* in "free" tree */
+		struct vm_struct *vm;           /* in "busy" tree */
+	};
+};
+
 /*
 
 __vmalloc()的核心实现是__vmalloc_node_range()

@@ -10,16 +10,18 @@
                                     |
             ----------------------------------
             |                                 |
-    get_page_from_freelist() 失败------>    __alloc_pages_slowpath()
-
-         |
+    get_page_from_freelist() 失败------>    __alloc_pages_slowpath()//该函数进行内存页的规整，换出，释放等耗时的动作，
+                                            ,如果还不行，则使用OOM，kill一些进程以满足页分配，如果还不行则分配失败
+                                               
+           |
         rmqueue()//当伙伴系统中大小为order的空闲链表分配完了，调用该函数从大的order中切出一块来分配。
            |
-        __rmqueue()
+        __rmqueue()//如果没有适合的order的页提供分配，则从高的order拆分一块来分配，由函数实现
+                               //expand(zone, page, order, current_order, migratetype);
             |
-        __rmqueue_fallback()
-            |
-    steal_suitable_fallback()
+        __rmqueue_fallback()//当希望的迁移类型的页面分配完了，可以从其他迁移类型的页面链表中获取分配的页面
+            |----------------------------|
+      find_suitable_fallback( )       steal_suitable_fallback()
 
            |
 boost_watermark()//设置ZONE_BOOSTED_WATERMARK标志位
@@ -395,6 +397,117 @@ typedef struct pglist_data {
 	struct per_cpu_nodestat __percpu *per_cpu_nodestats;
 	atomic_long_t		vm_stat[NR_VM_NODE_STAT_ITEMS];
 } pg_data_t;
+
+
+
+#ifndef CONFIG_FORCE_MAX_ZONEORDER
+#define MAX_ORDER 11
+#else
+#define MAX_ORDER CONFIG_FORCE_MAX_ZONEORDER
+#endif
+#define MAX_ORDER_NR_PAGES (1 << (MAX_ORDER - 1))
+
+struct zone {
+
+...............................
+
+           /*伙伴系统的数据结构*/ 
+	 /* free areas of different sizes */
+	struct free_area	free_area[MAX_ORDER];
+
+..............................
+
+}
+
+//如果各种迁移类型的链表中没有一块较大连续的内存，页面迁移没有任何的好处，可以通过设置全局变量
+//int page_group_by_mobility_disabled __read_mostly;关闭页面迁移
+enum migratetype {
+	MIGRATE_UNMOVABLE,
+	MIGRATE_MOVABLE,
+	MIGRATE_RECLAIMABLE,
+	MIGRATE_PCPTYPES,	/* the number of types on the pcp lists */
+	MIGRATE_HIGHATOMIC = MIGRATE_PCPTYPES,
+#ifdef CONFIG_CMA
+	/*
+	 * MIGRATE_CMA migration type is designed to mimic the way
+	 * ZONE_MOVABLE works.  Only movable pages can be allocated
+	 * from MIGRATE_CMA pageblocks and page allocator never
+	 * implicitly change migration type of MIGRATE_CMA pageblock.
+	 *
+	 * The way to use it is to change migratetype of a range of
+	 * pageblocks to MIGRATE_CMA which can be done by
+	 * __free_pageblock_cma() function.  What is important though
+	 * is that a range of pageblocks must be aligned to
+	 * MAX_ORDER_NR_PAGES should biggest page be bigger than
+	 * a single pageblock.
+	 */
+	MIGRATE_CMA,
+#endif
+#ifdef CONFIG_MEMORY_ISOLATION
+	MIGRATE_ISOLATE,	/* can't allocate from here */
+#endif
+	MIGRATE_TYPES
+};
+
+//数组的初始化在zone_init_free_lists()
+struct free_area {
+	struct list_head	free_list[MIGRATE_TYPES];
+	unsigned long		nr_free;
+};
+
+//如果各种迁移类型的链表中没有一块较大连续的内存，页面迁移没有任何的好处，可以通过设置全局变量
+//int page_group_by_mobility_disabled __read_mostly;关闭页面迁移
+
+void __ref build_all_zonelists(pg_data_t *pgdat)
+{
+	unsigned long vm_total_pages;
+
+	if (system_state == SYSTEM_BOOTING) {
+		build_all_zonelists_init();
+	} else {
+		__build_all_zonelists(pgdat);
+		/* cpuset refresh routine should be here */
+	}
+	/* Get the number of free pages beyond high watermark in all zones. */
+	vm_total_pages = nr_free_zone_pages(gfp_zone(GFP_HIGHUSER_MOVABLE));
+	/*
+	 * Disable grouping by mobility if the number of pages in the
+	 * system is too low to allow the mechanism to work. It would be
+	 * more accurate, but expensive to check per-zone. This check is
+	 * made on memory-hotadd so a system can start with mobility
+	 * disabled and enable it later
+	 */
+	if (vm_total_pages < (pageblock_nr_pages * MIGRATE_TYPES))
+		page_group_by_mobility_disabled = 1;
+	else
+		page_group_by_mobility_disabled = 0;
+
+	pr_info("Built %u zonelists, mobility grouping %s.  Total pages: %ld\n",
+		nr_online_nodes,
+		page_group_by_mobility_disabled ? "off" : "on",
+		vm_total_pages);
+#ifdef CONFIG_NUMA
+	pr_info("Policy zone: %s\n", zone_names[policy_zone]);
+#endif
+}
+
+//当希望的迁移类型的页面分配完了，可以从其他迁移类型的页面链表中获取分配的页面
+//当希望的迁移类型的页面分配完了，接下来可以使用那种类型的页面
+/*
+内核在初始化的时候，调用memmap_init_zone()函数把内存页都标记为可移动的，减少外部碎片
+*/
+static int fallbacks[MIGRATE_TYPES][3] = {
+	[MIGRATE_UNMOVABLE]   = { MIGRATE_RECLAIMABLE, MIGRATE_MOVABLE,   MIGRATE_TYPES },
+	[MIGRATE_MOVABLE]     = { MIGRATE_RECLAIMABLE, MIGRATE_UNMOVABLE, MIGRATE_TYPES },
+	[MIGRATE_RECLAIMABLE] = { MIGRATE_UNMOVABLE,   MIGRATE_MOVABLE,   MIGRATE_TYPES },
+#ifdef CONFIG_CMA
+	[MIGRATE_CMA]         = { MIGRATE_TYPES }, /* Never used */
+#endif
+#ifdef CONFIG_MEMORY_ISOLATION
+	[MIGRATE_ISOLATE]     = { MIGRATE_TYPES }, /* Never used */
+#endif
+};
+
 ```
 
 #### 第二次机会
