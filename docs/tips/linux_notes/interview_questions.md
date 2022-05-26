@@ -168,7 +168,9 @@ if ((x >= - EPSILON) && (x <= EPSILON)
 
 9. IP地址由两部分组成，网络号和主机号。
 
-10. 在IA-32体系中，HUGETLB_PAGE_ORDER = 10，所以大页的长度是4M,小页4KB.IA-64体系结构中HUGETLB_PAGE_ORDER = 第二大的order,可以自己设置
+10. 在IA-32体系中，表示该分配阶对应的页数HUGETLB_PAGE_ORDER = 10，所以大页的长度是4M(1024个页大小),小页4KB.IA-64体系结构中HUGETLB_PAGE_ORDER = 第二大的order,可以自己设置
+
+11. switch语句后的控制表达式只能是short、char、int、long整数类型和枚举类型，不能是float，double和boolean类型
 
 ## 
 

@@ -471,11 +471,98 @@ SYSCALL_DEFINE3(shmat, int, shmid, char __user *, shmaddr, int, shmflg)
 
 ```
 
+#### 页缓存
+1. page_cache_alloc()分配一个即将加入页缓存的页
+2. add_to_page_cache_lru()将页插入到页缓存中。
+3. find_get_page()判断页是否已经加入页缓存
+4. mpage_readpage(), mpage_writepage()对整页进行操作。
+
+#### 块缓存
+1. 可以使用缓冲区buffer_head，把一个整页换分为几个叫较小的单位，这样只需把修改的buffer_head写回磁盘即可
+提高文件的读写性能。
+```c
+struct buffer_head {
+	unsigned long b_state;		/* buffer state bitmap (see above) */
+	struct buffer_head *b_this_page;/* circular list of page's buffers */
+	struct page *b_page;		/* the page this bh is mapped to */
+
+	sector_t b_blocknr;		/* start block number */
+	size_t b_size;			/* size of mapping */
+	char *b_data;			/* pointer to data within the page */
+
+	struct block_device *b_bdev;
+	bh_end_io_t *b_end_io;		/* I/O completion */
+ 	void *b_private;		/* reserved for b_end_io */
+	struct list_head b_assoc_buffers; /* associated with another mapping */
+	struct address_space *b_assoc_map;	/* mapping this buffer is
+						   associated with */
+	atomic_t b_count;		/* users using this buffer_head */
+	spinlock_t b_uptodate_lock;	/* Used by the first bh in a page, to
+					 * serialise IO completion of other
+					 * buffers in the page */
+};
+
+```
+
+2. page的private属性用来关联缓冲区和页(private指向划分更小单位的第一个缓冲头buffer_head)
+各个缓冲头buffer_head的b_this_page连接起来形成一个环形链表
+```c
+struct page {
+
+................
+
+unsigned long private;
+
+.................
+
+}
+
+//该函数根据页的大小建立一个环形buffer_head,并将其与page联系起来。这样从page就可以扫描与页关联的所有buffer_head实例
+void create_empty_buffers(struct page *page,
+			unsigned long blocksize, unsigned long b_state)
+{
+	struct buffer_head *bh, *head, *tail;
+
+	head = alloc_page_buffers(page, blocksize, true);
+	bh = head;
+	do {
+		bh->b_state |= b_state;
+		tail = bh;
+		bh = bh->b_this_page;
+	} while (bh);
+	tail->b_this_page = head;
+
+	spin_lock(&page->mapping->private_lock);
+	if (PageUptodate(page) || PageDirty(page)) {
+		bh = head;
+		do {
+			if (PageDirty(page))
+				set_buffer_dirty(bh);
+			if (PageUptodate(page))
+				set_buffer_uptodate(bh);
+			bh = bh->b_this_page;
+		} while (bh != head);
+	}
+	attach_page_private(page, head);
+	spin_unlock(&page->mapping->private_lock);
+}
+EXPORT_SYMBOL(create_empty_buffers);
+
+```
+
+#### LRU缓存(独立的缓冲区)
+1. LRU缓存很小，只有16和buffer_head元素，
+2.__getblk_gfg()函数来对缓冲区进行查找，先查找LRU缓存，然后查找页缓存，不成功则调用grow_buffers()函数为缓冲头和数据分配内存。
+
+```c
 
 
-
-
-
+#define BH_LRU_SIZE	16
+//是per-cpu元素，改善cpu高速缓存的使用效率
+struct bh_lru {
+	struct buffer_head *bhs[BH_LRU_SIZE];//缓冲头指针数组
+};
+```
 
 
 

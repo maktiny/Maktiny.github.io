@@ -3,7 +3,7 @@
 2. 设备号在统一范围的所有设备文件由同一个设备驱动程序处理。
 3. 字符设备一般不用缓冲，使用硬件设备提供的寄存器和中断即可与cpu通信
 4. 声卡等顺序设备的缓冲使用循环缓冲区。
-```
+```c
   /*
   *     字符设备驱动程序描述符
   * cdev_alloc()分配cdev描述符
@@ -61,7 +61,7 @@ regietr_chrdev_region()和alloc_cgrdev_region()//分配一个范围的设备号
 
 ### 磁盘的描述符 gendisk
 
-```
+```c
 struct gendisk {
 	/* major, first_minor and minors are input parameters only,
 	 * don't use directly.  Use disk_devt() and disk_max_parts().
@@ -119,7 +119,7 @@ struct gendisk {
 1. 
 2.
 3. 
-```
+```c
 /* bio中的每一个段是由bio_vec结构体描述*/
 struct bio_vec {
 	struct page	*bv_page;#指向段的页框中页的指针
@@ -186,7 +186,7 @@ struct bio {
 
 1. 请求队列struct request_queue中存放请求request
 
-```
+```c
 struct request {
 	struct request_queue *q;
 	struct blk_mq_ctx *mq_ctx;
@@ -336,7 +336,7 @@ struct request {
 3. Anticipatory预期算法: 预期算法是deadline的改进版，为每个读请求执行完之后预留默认6ms的时间
 如果在窗口期内，收到相邻位置的读请求可以马上满足。
 
-```
+```c
  //IO调度算法使用elevator_type描述
 struct elevator_type
 {
@@ -368,7 +368,7 @@ struct elevator_type
 
 ### 块设备驱动程序
 
-```
+```c
   //块设备驱动程序描述符
 struct device_driver {
 	const char		*name;

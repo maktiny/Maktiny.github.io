@@ -2,7 +2,7 @@
 1. 伙伴系统分配以页为单位，如果需要更小的内存分配使用slab,slab最终使用伙伴系统来
 分配物理页面，只不过slab分配器在物理页面上实现自己的机制，实现更细粒度管理内存。
 slab分配器在创建的不分配物理内存，只有在分配slab对象的时候，没有空闲对象的时候才分配物理内存
-2. slab机制创建了多层缓冲池：共享对象缓冲池和每个CPU对象缓冲池
+2. slab机制创建了多层缓冲池：共享对象缓冲池和每个CPU对象缓冲池(per-cpu)
 3. 每个slab分配器只负责一种 类型的对象，比如anon_vma对象
 4. slab分配对象有三层结构
 * 仍然处于CPU高速缓存中的per_cpu对象
@@ -17,12 +17,12 @@ slab分配器在创建的不分配物理内存，只有在分配slab对象的时
 
 
 ```c
-//创建slab分配器
+//创建slab分配器(slab缓存池)
 struct kmem_cache *
 kmem_cache_create(const char *name, unsigned int size, unsigned int align,
 		slab_flags_t flags, void (*ctor)(void *))
 
-//释放slab描述符
+//释放slab缓存池
 void kmem_cache_destroy(struct kmem_cache *s)
 
 //分配缓存对象
@@ -127,7 +127,7 @@ struct kmem_cache_node {
 
 };
 
-//缓冲池结构体(本地对象缓冲池 共享对象缓冲池)
+//缓冲池结构体(本地对象缓冲池)
 struct array_cache {
 	unsigned int avail;
 	unsigned int limit;
@@ -146,19 +146,19 @@ struct array_cache {
                 |
              kmem_cache_create_usercopy()
                 |
-            __kmem_cache_alias()//判断是否可以复用现成的slab描述符------>create_cache()
+            __kmem_cache_alias()//判断是否可以复用现成的slab缓存池------>create_cache()
                 |                                                            |
-                |                                                       __kmem_cache_creae()//创建一个slab描述符
-            返回slab描述符                                                   |
+                |                                                       __kmem_cache_creae()//创建一个slab缓存池
+            返回slab缓存池                                                   |
                                                                             list_add()//添加到slab_cache链表中
-                                                                                | 返回slab描述符
+                                                                                | 返回slab缓存池
 calculate_slab_order()函数用来计算slab分配器需要的页面数
 ```
 
 5. 分配slab对象
 ```c
    slab分配器创建slab对象的时候使用伙伴系统的借口分配物理页
-   cache_alloc_refille()--->cache_grow_begin()--->kmem_getpages()--->__alloc_pages_node()分配物理页
+   cache_alloc_refill()--->cache_grow_begin()--->kmem_getpages()--->__alloc_pages_node()分配物理页
 
    kmem_cache_alloc()
               |
@@ -174,9 +174,9 @@ calculate_slab_order()函数用来计算slab分配器需要的页面数
             //中迁移一部分slab空闲对象到当前slab分配器进行分配，
                 |
             cache_grow_begin()
-            如果还是失败，则重新建一个slab分配器
+            如果还是失败，则增加slab的页数
                |
-           alloc_block()//使用该函数把新建的slab分配器中空闲对象迁移到当前slab中进行分配
+           alloc_block()//使用该函数把新增加的slab页中的空闲对象迁移到当前slab中进行分配
 ```
 
 6. 释放slab缓存对象

@@ -3,7 +3,7 @@
 
 1. 页面分配
 
-```
+```c
                                alloc_pages()
                                    |
                                 __alloc_pages()
@@ -34,7 +34,7 @@ boost_watermark()//设置ZONE_BOOSTED_WATERMARK标志位
 * WMARK_LOW：当zone的内存低于改值时，使用慢路径__alloc_pages_slowpath()
 * WMARK_HIGH: 内存充足。
 
-```
+```c
 /*
  zonelist中是所有可用的zone链表，第一个节点最先选用，其他的是备选
  系统初始化的时候使用build_zonelist()函数建立zonelist
@@ -53,7 +53,7 @@ struct zoneref {
 
 ```
 
-```
+```c
 struct page {
 	unsigned long flags;		/* Atomic flags, some possibly
 					 * updated asynchronously */
@@ -84,7 +84,7 @@ struct page {
 * 释放页面的核心函数是_free_one_page()，该函数还可把空闲页面合并，之后放置到
 高一级的空闲链表中。
 
-```
+```c
 free_page()--> __free_page()-->free_the_page()-->	__free_pages_ok()-->__free_one_page()
 
 
@@ -292,13 +292,16 @@ try_to_unmap()-->rmap_walk()-->rmap_walk_anon() unmap的流程。
 
 
 #### LRU链表(双向链表)
-1. 内存紧张的时候优先换出文件映射的文件缓存，应为只有脏页才会写会磁盘，
+1. 内存紧张的时候优先换出文件映射的文件缓存，因为只有脏页才会写会磁盘，
 匿名映射缓存需要写入交换区之后才能换出，每个内存节点都有一整套LRU链表
 
 2. 基于内存节点的页面回收机制可以解决：同一个内存节点不同zone中存在的页面的
 不同老化速度问题，也就是同一个程序的页面老化速度不同。
+3. 引入一个计数器，每个cpu周期计数器加一，当访问页的时候，将页的计数器设置为系统计数器的值，
+缺页异常发生后，比较所有页的计数器即可判断那些页最近最少使用。
 
 ```c
+
  //LRU链表类型(内核中共有5中LRU链表 )
 #define LRU_ALL_FILE (BIT(LRU_INACTIVE_FILE) | BIT(LRU_ACTIVE_FILE)) //文件映射链表
 #define LRU_ALL_ANON (BIT(LRU_INACTIVE_ANON) | BIT(LRU_ACTIVE_ANON)) //匿名页面链表
@@ -350,6 +353,21 @@ struct lruvec {
 };
 
 
+//lru_cache_add()该函数把页缓存在页向量pagevec中，当pagevec数组满了之后才把整个页向量加入相应的lru链表中
+//lru_cache_add_active()添加活跃的页。
+------------------
+        CPU0      
+                  
+                [inactive lru 缓存链表] [active lru缓存链表]
+
+	CPU1              |                   |
+------------------        |                   |
+                          |                   |
+                          |                   |  
+-------------- 全局LRU链表--------------------------
+                          |                   | 
+	    [inactive lru 链表]      [active lru 链表]
+
 
 void lru_cache_add(struct page *page)
 {
@@ -376,7 +394,12 @@ EXPORT_SYMBOL(lru_cache_add);
  * Memory statistics and page replacement data structures are maintained on a
  * per-zone basis.
  */
+```
 
+#### 内存节点
+
+
+```c
  //内存节点描述符
 typedef struct pglist_data {
 	/*
@@ -511,7 +534,7 @@ static int fallbacks[MIGRATE_TYPES][3] = {
 ```
 
 #### 第二次机会
-1. 当页面被访问过之后，其访问位置1，改页不会被换出，其他的和LRU算法一样
+1. FIFO算法的改进，当页面被访问过之后，其访问位置1，FIFO队列尾部的页如果访问位是1,则把该页移到FIFO的头部，而不是直接换出
 
 2. 触发页面回收的机制
 * 直接页面回收机制：使用alloc_pages时候，内存不足，陷入到页面回收机制
@@ -519,7 +542,152 @@ static int fallbacks[MIGRATE_TYPES][3] = {
 * slab shrinker机制：回收slab对象
 
 
-#### kswapd内核线程(页面回收)
+#### 交换区的数据结构
+1. 如果想要新建交换分区，用户可以使用用户程序mkswap程序,创建号之后，使用sys_swapon系统调用向内核注册
+如果没有指定优先级，内核初始化为当前最低优先级减一。
+```c
+
+//存储了系统中各个交换区的信息,可以使用优先级来管理各个交换区
+struct swap_info_struct *swap_info[MAX_SWAPFILES];
+
+
+//系统交换区信息
+liyi@liyi ~ [1]> sudo cat /proc/swaps
+Filename				Type		Size		Used		Priority
+/dev/nvme0n1p1                          partition	15998972	0		-2
+
+
+
+/
+struct swap_cluster_info {
+	spinlock_t lock;	/*
+				 * Protect swap_cluster_info fields
+				 * and swap_info_struct->swap_map
+				 * elements correspond to the swap
+				 * cluster
+				 */
+	unsigned int data:24;
+	unsigned int flags:8;
+};
+#define CLUSTER_FLAG_FREE 1 /* This cluster is free */
+#define CLUSTER_FLAG_NEXT_NULL 2 /* This cluster has no next cluster */
+#define CLUSTER_FLAG_HUGE 4 /* This cluster is backing a transparent huge page */
+
+/*
+ * We assign a cluster to each CPU, so each CPU can allocate swap entry from
+ * its own cluster and swapout sequentially. The purpose is to optimize swapout
+ * throughput.
+ */
+ //内核为per-cpu分配交换区，next指向接下来可以使用的交换区
+struct percpu_cluster {
+	struct swap_cluster_info index; /* Current cluster index */
+	unsigned int next; /* Likely next allocation offset */
+};
+
+struct swap_cluster_list {
+	struct swap_cluster_info head;
+	struct swap_cluster_info tail;
+};
+
+//交换区描述符，管理交换区
+struct swap_info_struct {
+	struct percpu_ref users;	/* indicate and keep swap device valid. */
+	unsigned long	flags;		/* SWP_USED etc: see above */
+	signed short	prio;		/* swap priority of this type */
+	struct plist_node list;		/* entry in swap_active_head */
+	signed char	type;		/* strange name for an index */
+	unsigned int	max;		/* extent of the swap_map */
+	unsigned char *swap_map;	/* vmalloc'ed array of usage counts */
+	struct swap_cluster_info *cluster_info; /* cluster info. Only for SSD */
+	struct swap_cluster_list free_clusters; /* free clusters list */
+	unsigned int lowest_bit;	/* index of first free in swap_map */
+	unsigned int highest_bit;	/* index of last free in swap_map */
+	unsigned int pages;		/* total of usable pages of swap */
+	unsigned int inuse_pages;	/* number of those currently in use */
+	unsigned int cluster_next;	/* likely index for next allocation */
+	unsigned int cluster_nr;	/* countdown to next cluster search */
+	unsigned int __percpu *cluster_next_cpu; /*percpu index for next allocation */
+	struct percpu_cluster __percpu *percpu_cluster; /* per cpu's swap location */
+	struct rb_root swap_extent_root;/* root of the swap extent rbtree */
+	struct block_device *bdev;	/* swap device or bdev of swap file */
+	struct file *swap_file;		/* seldom referenced */
+	unsigned int old_block_size;	/* seldom referenced */
+	struct completion comp;		/* seldom referenced */
+#ifdef CONFIG_FRONTSWAP
+	unsigned long *frontswap_map;	/* frontswap in-use, one bit per page */
+	atomic_t frontswap_pages;	/* frontswap pages in-use counter */
+#endif
+	spinlock_t lock;		/*
+					 * protect map scan related fields like
+					 * swap_map, lowest_bit, highest_bit,
+					 * inuse_pages, cluster_next,
+					 * cluster_nr, lowest_alloc,
+					 * highest_alloc, free/discard cluster
+					 * list. other fields are only changed
+					 * at swapon/swapoff, so are protected
+					 * by swap_lock. changing flags need
+					 * hold this lock and swap_lock. If
+					 * both locks need hold, hold swap_lock
+					 * first.
+					 */
+	spinlock_t cont_lock;		/*
+					 * protect swap count continuation page
+					 * list.
+					 */
+	struct work_struct discard_work; /* discard worker */
+	struct swap_cluster_list discard_clusters; /* discard clusters list */
+	struct plist_node avail_lists[]; /*
+					   * entries in swap_avail_heads, one
+					   * entry per node.
+					   * Must be last as the number of the
+					   * array is nr_node_ids, which is not
+					   * a fixed value so have to allocate
+					   * dynamically.
+					   * And it has to be an array so that
+					   * plist_for_each_* can work.
+					   */
+};
+
+//内核使用该结构标记需要换出的页
+typedef struct {
+	unsigned long val;
+} swp_entry_t;
+
+unsigned long val : 0-------59---------63
+                       |            |
+	           偏移            交换区标识符
+```
+2. 交换区是磁盘或者块设备，这些结构都是为了把交换区组织起来提供给内核使用。
+3. 页面回收在内存中设置交换缓存，之后可以异步把交换缓存中的数据写入交换区中。
+```c
+
+static const struct address_space_operations swap_aops = {//交换缓存注册的接口函数，
+	.writepage	= swap_writepage,
+	.set_page_dirty	= swap_set_page_dirty,
+#ifdef CONFIG_MIGRATION
+	.migratepage	= migrate_page,
+#endif
+};
+
+struct address_space *swapper_spaces[MAX_SWAPFILES] __read_mostly;//交换缓存结构
+static unsigned int nr_swapper_spaces[MAX_SWAPFILES] __read_mostly;
+
+```
+
+1. 在使用文件作为交换区的时候，文件对应的磁盘可能是不连续的，使用swap_extent结构来处理不连续时候的交换区与磁盘之间的映射问题
+```c
+
+struct swap_extent {
+	struct rb_node rb_node;
+	pgoff_t start_page;
+	pgoff_t nr_pages;
+	sector_t start_block;
+};
+
+
+```
+
+##### 页面交换时的控制参数 
 
 ```c
 //用于控制页面回收的参数
@@ -561,13 +729,19 @@ struct scan_control {
 	struct reclaim_state reclaim_state;
 };
 
-                         kswapd()
-                            |
-                   balance_pgdat()
-                           |
-               kswapd_shrink_node()
-                          |
-              shrink_node(pgdat, sc)
+```
+#### kswapd内核线程(页面回收接口
+1. 页面回收在两个地方触发：直接页面回收 try_to_free_pages() 和页交换进程kswap()，NUMA的每个内存节点有一个kswap实例，UMA只有一个kswap实例
+2. 每个内存域两个LRU链表，active，in_active
+
+```c
+                         kswapd()                         do_try_to_free_pages()
+                            |                                  |
+                   balance_pgdat()                       shrink_zones()
+                           |                                 |      
+               kswapd_shrink_node()                          |  
+                          |                                  |
+              shrink_node(pgdat, sc)<-------------------------
                          |
             shrink_node_memcgs(pgdat, sc)
                         |
@@ -584,12 +758,42 @@ shrink_active_list()                         shrink_inactive_list()
    l_active      |                                         shrink_page_list()//扫描回收page_list中的页表
    l_inactive    |                                        剩下的是不可回收的，move_pages_to_lru（）移回原来的LRU链表          
 三个链表         |                                            |
-                 |                                         add_to_swap()把匿名页交换到交换区                                                         
-            isolate_lru_pages()
-            把LRU链表中的项移到l_hold，
-            减少加锁时间,遍历l_hold,分别放到
-l_active和l_inactive链表中，剩余的是可以回收的项
+                 |                                         add_to_swap()构造BIO,交换区等，把页交换到交换区                                                         
+            isolate_lru_pages() 集中回收算法                   |
+            把LRU链表中的项移到l_hold，                        |-----get_swap_page()//分配交换空间，在交换区中获取一个槽位
+            减少加锁时间,遍历l_hold,分别放到                   |
+l_active和l_inactive链表中，剩余的是可以回收的项               |------—__add_to_swap_page_cache()把页写入交换区缓存
 然后把l_active,l_inactive中的项移动到相应的LRU链表
+
+
+
+//内核提供接口，可以自己注册内存收缩器
+//register_shrinker() unregister_shrinker()
+//注册的内存收缩器被添加到一个全局链表中shrinker_list中
+
+static LIST_HEAD(shrinker_list);
+
+struct shrinker {
+        //这两个函数指针是注册收缩器必须实现的内存回收函数
+	unsigned long (*count_objects)(struct shrinker *,
+				       struct shrink_control *sc);
+	unsigned long (*scan_objects)(struct shrinker *,
+				      struct shrink_control *sc);
+
+	long batch;	/* reclaim batch size, 0 = default */
+	int seeks;	/* seeks to recreate an obj */
+	unsigned flags;
+
+	/* These are for internal use */
+	struct list_head list;
+#ifdef CONFIG_MEMCG
+	/* ID in shrinker_idr */
+	int id;
+#endif
+	/* objs pending delete, per node */
+	atomic_long_t *nr_deferred;
+};
+#define DEFAULT_SEEKS 2 /* A good number if you don't know better. */
 
 ```
 
