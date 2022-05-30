@@ -79,12 +79,117 @@ clone() ,fork(), vfork()的系统调用都是
 ```c
 struct task_struct{
 
-    int				prio; //动态优先级
+        int				prio; //动态优先级
 	int				static_prio; //静态优先级
 	int				normal_prio; //根据static_prio和调度策略计算出来的优先级
 	unsigned int			rt_priority;//实时优先级
 	
 }
+
+
+
+//调度器调度的对象是sched_entity，进程组或者进程(task_struct中包含sched_entity元素)都可以是调度实体
+struct sched_entity {
+	/* For load-balancing: */
+	struct load_weight		load;
+	struct rb_node			run_node;
+	struct list_head		group_node;
+	unsigned int			on_rq;
+
+	u64				exec_start;
+	u64				sum_exec_runtime;
+	u64				vruntime;
+	u64				prev_sum_exec_runtime;
+
+	u64				nr_migrations;
+
+	struct sched_statistics		statistics;
+
+#ifdef CONFIG_FAIR_GROUP_SCHED
+	int				depth;
+	struct sched_entity		*parent;
+	/* rq on which this entity is (to be) queued: */
+	struct cfs_rq			*cfs_rq;
+	/* rq "owned" by this entity/group: */
+	struct cfs_rq			*my_q;
+	/* cached value of my_q->h_nr_running */
+	unsigned long			runnable_weight;
+#endif
+
+#ifdef CONFIG_SMP
+	/*
+	 * Per entity load average tracking.
+	 *
+	 * Put into separate cache line so it does not
+	 * collide with read-mostly values above.
+	 */
+	struct sched_avg		avg;
+#endif
+};
+//就绪队列
+struct rq {
+	/* runqueue lock: */
+	raw_spinlock_t		__lock;
+
+	/*
+	 * nr_running and cpu_load should be in the same cacheline because
+	 * remote CPUs use both these fields when doing load calculation.
+	 */
+	unsigned int		nr_running;
+...............................................
+	struct cfs_rq		cfs;
+	struct rt_rq		rt;   //各个就绪队列中插入的特定调度器类的子就绪队列
+	struct dl_rq		dl;
+
+#ifdef CONFIG_FAIR_GROUP_SCHED
+	/* list of leaf cfs_rq on this CPU: */
+	struct list_head	leaf_cfs_rq_list;
+	struct list_head	*tmp_alone_branch;
+#endif /* CONFIG_FAIR_GROUP_SCHED */
+
+	/*
+	 * This is part of a global counter where only the total sum
+	 * over all CPUs matters. A task can increase this counter on
+	 * one CPU and if it got migrated afterwards it may decrease
+	 * it on another CPU. Always updated under the runqueue lock:
+	 */
+	unsigned int		nr_uninterruptible;
+
+	struct task_struct __rcu	*curr;
+	struct task_struct	*idle;
+	struct task_struct	*stop;
+	unsigned long		next_balance;
+	struct mm_struct	*prev_mm;
+
+	unsigned int		clock_update_flags;
+	u64			clock;
+	/* Ensure that all clocks are in the same cache line */
+	u64			clock_task ____cacheline_aligned;
+	u64			clock_pelt;
+	unsigned long		lost_idle_time;
+
+	atomic_t		nr_iowait;
+.........................................................
+#ifdef CONFIG_SCHED_CORE
+	/* per rq */
+	struct rq		*core;
+	struct task_struct	*core_pick;
+	unsigned int		core_enabled;
+	unsigned int		core_sched_seq;
+	struct rb_root		core_tree;
+
+	/* shared state -- careful with sched_core_cpu_deactivate() */
+	unsigned int		core_task_seq;
+	unsigned int		core_pick_seq;
+	unsigned long		core_cookie;
+	unsigned char		core_forceidle;
+	unsigned int		core_forceidle_seq;
+#endif
+};
+
+
+//系统定义了一个全局变量就绪队列rq runqueues[] 数组，数组中每个元素对应每个cpu
+DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 
 ```
 
@@ -92,7 +197,8 @@ struct task_struct{
 #### 调度策略
 
 1. linux把调度策略抽象成调度类：stop, deadline, realtime, CFS, idle
-
+2. 实时进程 > 完全公平进程 > 空闲进行
+3. 调度类在内核编译时候确认，没有运行时添加的机制
 
 | 调度类   | 调度策略                              | 使用范围                       | 说明                                                         |
 | -------- | ------------------------------------- | ------------------------------ | ------------------------------------------------------------ |
@@ -149,12 +255,43 @@ struct sched_class {
 }
 ```
 
-#### CFS
+#### 完全公平调度CFS
 
 1. vruntime虚拟运行时间
 2. 优先级越高，vruntime越小，CFS选取红黑树中当前CPU的就绪队列中最小vruntime的进程作为调度进程。
 
 ```c
+//完全公平调度CFS的就绪队列
+/* CFS-related fields in a runqueue */
+struct cfs_rq {
+	struct load_weight	load;
+	unsigned int		nr_running;
+	unsigned int		h_nr_running;      /* SCHED_{NORMAL,BATCH,IDLE} */
+	unsigned int		idle_h_nr_running; /* SCHED_IDLE */
+
+	u64			exec_clock;
+	u64			min_vruntime;
+#ifdef CONFIG_SCHED_CORE
+	unsigned int		forceidle_seq;
+	u64			min_vruntime_fi;
+#endif
+
+#ifndef CONFIG_64BIT
+	u64			min_vruntime_copy;
+#endif
+
+	struct rb_root_cached	tasks_timeline;
+
+	/*
+	 * 'curr' points to currently running entity on this cfs_rq.
+	 * It is set to NULL otherwise (i.e when none are currently running).
+	 */
+	struct sched_entity	*curr;
+	struct sched_entity	*next;
+	struct sched_entity	*last;
+	struct sched_entity	*skip;
+...................................
+}
 ///权重
 struct load_weight {
 	unsigned long			weight;
@@ -217,6 +354,47 @@ vruntime = ------------------------------------------
                   进程的实际权重
 ```
 
+#### 实时调度rt
+1. 有两种实时调度进程：SCHED_RR 循环调度进程   SCHED_FIFO 先入先出进程(组织和调度方式不同)
+```c
+
+//实时调度的就绪队列
+struct rt_rq {
+	struct rt_prio_array	active;
+	unsigned int		rt_nr_running;
+	unsigned int		rr_nr_running;
+#if defined CONFIG_SMP || defined CONFIG_RT_GROUP_SCHED
+	struct {
+		int		curr; /* highest queued rt task prio */
+#ifdef CONFIG_SMP
+		int		next; /* next highest */
+#endif
+	} highest_prio;
+#endif
+#ifdef CONFIG_SMP
+	unsigned int		rt_nr_migratory;
+	unsigned int		rt_nr_total;
+	int			overloaded;
+	struct plist_head	pushable_tasks;
+
+#endif /* CONFIG_SMP */
+	int			rt_queued;
+
+	int			rt_throttled;
+	u64			rt_time;
+	u64			rt_runtime;
+	/* Nests inside the rq lock: */
+	raw_spinlock_t		rt_runtime_lock;
+
+#ifdef CONFIG_RT_GROUP_SCHED
+	unsigned int		rt_nr_boosted;
+
+	struct rq		*rq;
+	struct task_group	*tg;
+#endif
+};
+
+```
 
 #### 进程调度
 
@@ -288,7 +466,7 @@ __schedule()
 
 ```
 
-#### 调度节拍（周期性调度）  scheduler_tick()
+#### 周期性调度  scheduler_tick()
 
 ```c
 #0  scheduler_tick () at kernel/sched/core.c:5196
@@ -326,8 +504,12 @@ __schedule()
               |
               |
               |--trigger_load_balance(rq);//触发负载均衡
+                       |
+		raise_softirq()//触发软中断，中断处理函数在时候的时候调用run_rebalance_domains()---->rebalance_domains()
 
-      
+
+
+
 ```
 
 #### 组调度机制
@@ -393,7 +575,7 @@ struct task_group {
 #### SMP负载均衡
 
 1. 内核对CPU的管理通过位图bitmap
-
+2. 在SMP系统上通过调度实现负载均衡(把进程从繁忙的CPU就绪队列迁移到空闲的就绪队列中)
 ```c
  // 表示可运行的cpu核数
 #define cpu_possible_mask ((const struct cpumask *)&__cpu_possible_mask)
@@ -442,7 +624,7 @@ struct sched_group {
 	unsigned long		cpumask[];
 };
 
- //调度域描述符
+ //调度域描述符(一个CPU核是一个调度域)
 struct sched_domain {
 	/* These fields must be setup */
 	struct sched_domain __rcu *parent;	/* top domain must be null terminated */
