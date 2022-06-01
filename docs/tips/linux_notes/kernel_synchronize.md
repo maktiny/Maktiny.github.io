@@ -36,7 +36,7 @@ linux中原子位处理函数
 
 ```
 # define barrier() __asm__ __volatile__("": : :"memory")
-  ##编译器不能把asm中的指令与程序中的其他指令重新组合
+  ##编译器保证barrier()之前的指令在之后的指令先执行
 ```
 
 2. 内存屏障
@@ -222,7 +222,7 @@ EXPORT_SYMBOL(up);
 * up()函数释放信号量，如果等待队列为空，则信号量count++,
 * 否则调用__up()唤醒等待队列的中的进程。
 * 
-* down()申请获得信号量:down()函数回阻塞，所以中断处理/延迟函数不调用down,
+* down()申请获得信号量:down()函数会阻塞，所以中断处理/延迟函数不调用down,
 * 而是调用down_trylock()，该函数当count < 0时候，立即返回而不是挂起进程。
 *
 **/
@@ -521,6 +521,51 @@ SYSCALL_DEFINE2(signal, int, sig, __sighandler_t, handler)
 
 
 
+
+### 中断
+1. 中断上下文中，用户态进入内核态的时候，只需要保存部分寄存器的值，包含在pt_regs结构体中
+2. 可以使用request_irq（）和free_irq（）函数来动态的注册和删除中断
+3. 中断处理的三步： 从用户态切换到内核态-->执行中断上半部(中断处理程序)--->切换到用户态-->执行软中断(中断的下半部)
+
+```c 
+
+
+struct pt_regs {
+/*
+ * C ABI says these regs are callee-preserved. They aren't saved on kernel entry
+ * unless syscall needs a complete, fully filled "struct pt_regs".
+ */
+	unsigned long r15;
+	unsigned long r14;
+	unsigned long r13;
+	unsigned long r12;
+	unsigned long bp;
+	unsigned long bx;
+/* These regs are callee-clobbered. Always saved on kernel entry. */
+	unsigned long r11;
+	unsigned long r10;
+	unsigned long r9;
+	unsigned long r8;
+	unsigned long ax;
+	unsigned long cx;
+	unsigned long dx;
+	unsigned long si;
+	unsigned long di;
+/*
+ * On syscall entry, this is syscall#. On CPU exception, this is error code.
+ * On hw interrupt, it's IRQ number:
+ */
+	unsigned long orig_ax;
+/* Return frame for iretq */
+	unsigned long ip;
+	unsigned long cs;
+	unsigned long flags;
+	unsigned long sp;
+	unsigned long ss;
+/* top of stack page */
+};
+
+```
 ### 禁止本地中断
 1. 禁止本地中断并不保护运行在另一个CPU核上的中断
 处理程序对数据结构的并发访问。所以禁止本地中断与
@@ -607,6 +652,7 @@ struct irq_desc {
 
 struct irqaction {
 	irq_handler_t		handler;//中断处理的入口函数，handler 的第一个参数是中断号，第二个参数是设备对应的ID，第三个参数是中断发生时由内核保存的各个寄存器的值
+	                                //对于共享中断线的情况，可以通过dev_id来表示该中断来源是哪一个设备。
 	void			*dev_id;
 	void __percpu		*percpu_dev_id;
 	struct irqaction	*next;
@@ -620,6 +666,74 @@ struct irqaction {
 	const char		*name;
 	struct proc_dir_entry	*dir;
 } ____cacheline_internodealigned_in_smp;
+
+
+struct irq_data {
+	u32			mask;
+	unsigned int		irq;
+	unsigned long		hwirq;
+	struct irq_common_data	*common;
+	struct irq_chip		*chip;
+	struct irq_domain	*domain;
+#ifdef	CONFIG_IRQ_DOMAIN_HIERARCHY
+	struct irq_data		*parent_data;
+#endif
+	void			*chip_data;
+};
+
+//struct irq_chip - hardware interrupt chip descriptor
+//IRQ控制器，该结构体描述了体系结构的无关的IRQ控制器，函数指针提供的函数改变IRQ的状态。
+struct irq_chip {
+	struct device	*parent_device;
+	const char	*name;
+	unsigned int	(*irq_startup)(struct irq_data *data);
+	void		(*irq_shutdown)(struct irq_data *data);
+	void		(*irq_enable)(struct irq_data *data);
+	void		(*irq_disable)(struct irq_data *data);
+
+	void		(*irq_ack)(struct irq_data *data);
+	void		(*irq_mask)(struct irq_data *data);
+	void		(*irq_mask_ack)(struct irq_data *data);
+	void		(*irq_unmask)(struct irq_data *data);
+	void		(*irq_eoi)(struct irq_data *data);
+
+	int		(*irq_set_affinity)(struct irq_data *data, const struct cpumask *dest, bool force);
+	int		(*irq_retrigger)(struct irq_data *data);
+	int		(*irq_set_type)(struct irq_data *data, unsigned int flow_type);
+	int		(*irq_set_wake)(struct irq_data *data, unsigned int on);
+
+	void		(*irq_bus_lock)(struct irq_data *data);
+	void		(*irq_bus_sync_unlock)(struct irq_data *data);
+
+	void		(*irq_cpu_online)(struct irq_data *data);
+	void		(*irq_cpu_offline)(struct irq_data *data);
+
+	void		(*irq_suspend)(struct irq_data *data);
+	void		(*irq_resume)(struct irq_data *data);
+	void		(*irq_pm_shutdown)(struct irq_data *data);
+
+	void		(*irq_calc_mask)(struct irq_data *data);
+
+	void		(*irq_print_chip)(struct irq_data *data, struct seq_file *p);
+	int		(*irq_request_resources)(struct irq_data *data);
+	void		(*irq_release_resources)(struct irq_data *data);
+
+	void		(*irq_compose_msi_msg)(struct irq_data *data, struct msi_msg *msg);
+	void		(*irq_write_msi_msg)(struct irq_data *data, struct msi_msg *msg);
+
+	int		(*irq_get_irqchip_state)(struct irq_data *data, enum irqchip_irq_state which, bool *state);
+	int		(*irq_set_irqchip_state)(struct irq_data *data, enum irqchip_irq_state which, bool state);
+
+	int		(*irq_set_vcpu_affinity)(struct irq_data *data, void *vcpu_info);
+
+	void		(*ipi_send_single)(struct irq_data *data, unsigned int cpu);
+	void		(*ipi_send_mask)(struct irq_data *data, const struct cpumask *dest);
+
+	int		(*irq_nmi_setup)(struct irq_data *data);
+	void		(*irq_nmi_teardown)(struct irq_data *data);
+
+	unsigned long	flags;
+};
 
 ```
 
@@ -659,13 +773,14 @@ handle_irq_event()--->handle_irq_event_percpu()--->__handle_irq_event_percpu()--
 的中断就不能实时地被处理。鉴于这个原因，Linux把中断处理分为两个部分，上半部 和
 下半部.一般中断 上半部 只会做一些最基础的操作（比如从网卡中复制数据到缓存中），
 然后对要执行的中断 下半部 进行标识，标识完调用 do_softirq() 函数进行处理。
+中断下半部也叫做可延迟操作.
 2. softirq机制
 * 中断下半部 由 softirq（软中断） 机制来实现的
 * softirq_vec 数组是 softirq 机制的核心，softirq_vec 数组每个元素代表一种软中断
 * HI_SOFTIRQ 是高优先级tasklet，而 TASKLET_SOFTIRQ 是普通tasklet，tasklet是基于softirq机制的一种任务队列
 * NET_TX_SOFTIRQ 和 NET_RX_SOFTIRQ 特定用于网络子模块的软中断
 ```c
-
+//默认情况下，
 static struct softirq_action softirq_vec[NR_SOFTIRQS] __cacheline_aligned_in_smp;
 
 
@@ -773,6 +888,21 @@ struct tasklet_struct
 static DEFINE_PER_CPU(struct tasklet_head, tasklet_vec);
 static DEFINE_PER_CPU(struct tasklet_head, tasklet_hi_vec);
 
+//注册tasklet到系统中
+static inline void tasklet_schedule(struct tasklet_struct *t)
+{
+	if (!test_and_set_bit(TASKLET_STATE_SCHED, &t->state))
+		__tasklet_schedule(t);
+}
+
+extern void __tasklet_hi_schedule(struct tasklet_struct *t);
+
+static inline void tasklet_hi_schedule(struct tasklet_struct *t)
+{
+	if (!test_and_set_bit(TASKLET_STATE_SCHED, &t->state))
+		__tasklet_hi_schedule(t);
+}
+
 
 //两个taskle队列的调度
 void __tasklet_schedule(struct tasklet_struct *t)
@@ -788,6 +918,9 @@ void __tasklet_hi_schedule(struct tasklet_struct *t)
 				  HI_SOFTIRQ);
 }
 EXPORT_SYMBOL(__tasklet_hi_schedule);
+
+
+
 
 void __init softirq_init(void)
 {
@@ -817,3 +950,99 @@ static __latent_entropy void tasklet_hi_action(struct softirq_action *a)
 }
 ```
 4. tasklet_action_common()函数就是遍历tasklet_hi_vec或者tasklet_vec队列，执行其中的处理函数
+
+
+#### 等待队列
+1. __add_wait_queue() 将一个进程加入到等待队列，__add_wait_queue_exclusive()进程加入到等待队列的尾部，
+
+```c
+
+
+struct wait_queue_entry {
+	unsigned int		flags;
+	void			*private;//指向等待的进程task_struct
+	wait_queue_func_t	func;//唤醒进程的函数
+	struct list_head	entry;
+};
+
+typedef struct wait_queue_entry wait_queue_entry_t;
+
+struct wait_queue_head {
+	spinlock_t		lock;
+	struct list_head	head;//双链表，用来实现队列
+};
+typedef struct wait_queue_head wait_queue_head_t;
+
+
+//初始化等待队列
+#define DEFINE_WAIT_FUNC(name, function)					\
+	struct wait_queue_entry name = {					\
+		.private	= current,					\
+		.func		= function,					\
+		.entry		= LIST_HEAD_INIT((name).entry),			\
+	}
+
+#define DEFINE_WAIT(name) DEFINE_WAIT_FUNC(name, autoremove_wake_function)
+
+//初始化等待队列的实体
+static inline void init_waitqueue_entry(struct wait_queue_entry *wq_entry, struct task_struct *p)
+{
+	wq_entry->flags		= 0;
+	wq_entry->private	= p;
+	wq_entry->func		= default_wake_function;
+}
+
+
+//当创建等待队列之后，宏wait_event无线循环，直到条件满足，把进程状态置为TASK_RUNNING，然后从等待队列中移除
+#define wait_event(wq_head, condition)						\
+do {										\
+	might_sleep();								\
+	if (condition)								\
+		break;								\
+	__wait_event(wq_head, condition);					\
+} while (0)
+
+
+
+
+//唤醒进程
+#define wake_up(x)			__wake_up(x, TASK_NORMAL, 1, NULL)
+#define wake_up_nr(x, nr)		__wake_up(x, TASK_NORMAL, nr, NULL)
+#define wake_up_all(x)			__wake_up(x, TASK_NORMAL, 0, NULL)
+#define wake_up_locked(x)		__wake_up_locked((x), TASK_NORMAL, 1)
+#define wake_up_all_locked(x)		__wake_up_locked((x), TASK_NORMAL, 0)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
