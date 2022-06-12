@@ -1,1 +1,8 @@
 theme: jekyll-theme-cayman
+
+gitalk:
+  clientID: <6ffe2db84139272698af>
+  clientSecret: <f0ca780aa3b773a31ab646f1f53a81d16d83da2f>
+  repo: <Maktiny.github.io>
+  owner: <Maktiny>
+
