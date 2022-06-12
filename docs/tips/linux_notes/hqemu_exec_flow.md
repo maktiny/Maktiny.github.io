@@ -3,7 +3,6 @@
 
 
 ```c
-
 /* Helper function to perform trace prediction. */
 void helper_NET_predict(CPUArchState *env, int id)
 {
@@ -90,7 +89,6 @@ trace_building:
 ### hqemu对热点代码的优化流程
 
 #### 热点代码转换成LLVM IR的流程
-1. 
 ```c
 
 int LLVMEnv::OptimizeTrace(CPUArchState *env, OptRequest Request)
@@ -302,5 +300,4 @@ void TraceBuilder::ConvertToLLVMIR()
 ```
 
 #### LLVM后端的优化措施
-
 
