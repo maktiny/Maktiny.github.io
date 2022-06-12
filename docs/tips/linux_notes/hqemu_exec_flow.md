@@ -3,7 +3,6 @@
 
 
 ```c
-
 /* Helper function to perform trace prediction. */
 void helper_NET_predict(CPUArchState *env, int id)
 {
