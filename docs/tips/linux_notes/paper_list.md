@@ -65,15 +65,5 @@ NET算法只知道头结点，后续的热点块需要另外确定
 2. 他是基于IR实现的，在中间层可以容易的实现对路径编码，如果只有后端，怎实现路径编码，每一个TB都切换到qemu去进行编码？开销太大
 
 
-
-
-
-
-
-
-
-
-
-
 ### Improving the Performance of Trace-based Systems by False Loop Filtering 2011
 1. cyclic-path-based repetition detector,改进该算法，使其能够筛选出false loop，改善JIT的编译效率

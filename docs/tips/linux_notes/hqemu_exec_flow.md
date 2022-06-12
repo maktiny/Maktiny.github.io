@@ -86,7 +86,7 @@ trace_building:
 
 ### hqemu对热点代码的优化流程
 
-### 热点代码转换成LLVM IR的流程
+#### 热点代码转换成LLVM IR的流程
 1. 
 ```c
 
@@ -131,7 +131,7 @@ void LLVMTranslator::GenTrace(CPUArchState *env, OptimizationInfo *Opt)
     if (SP->isEnabled())
         gettimeofday(&start, nullptr);
 
-    TraceBuilder Builder(IF, Opt);
+    TraceBuilder Builder(IF, Opt);//先构建一个Trace
     for (;;) {
         GraphNode *Node = Builder.getNextNode();
         if (!Node)
@@ -158,7 +158,96 @@ void LLVMTranslator::GenTrace(CPUArchState *env, OptimizationInfo *Opt)
 
     Commit(Builder); //设置paper中的每个TB头的jump地址(直接跳转到优化后的TB地址去执行优化后的代码)
 }
+
+
+//构建翻译线程
+void *WorkerFunc(void *argv)
+{
+    unsigned MyID = (unsigned long)argv;
+    LLVMTranslator *Translator = LLEnv->getTranslator(MyID);
+    MemoryManager *MM = LLEnv->getMemoryManager().get();
+    CPUState *cpu = LLEnv->getThreadEnv(MyID);
+    CPUArchState *env = (CPUArchState *)cpu->env_ptr;
+
+    /* Block all signals. */
+    sigset_t set;
+    sigfillset(&set);
+    pthread_sigmask(SIG_SETMASK, &set, nullptr);
+
+    copy_tcg_context();
+    optimization_init(env);
+
+    Atomic<unsigned>::inc_return(&NumPendingThread);
+
+    for (;;) {
+        /* Exit the loop if a request is received. */
+        if (unlikely(ThreadExit))
+            break;
+
+        if (unlikely(ThreadStop)) {
+            Atomic<unsigned>::inc_return(&NumPendingThread);
+            while (ThreadStop)
+                usleep(100);
+
+            Translator = LLEnv->getTranslator(MyID);
+        }
+
+        /* Exit the loop if the trace cache is full. */
+        if (unlikely(!MM->isSizeAvailable())) {
+            TraceCacheFull = true;
+            ThreadStop = true;
+            continue;
+        }
+
+        /* Everything is fine. Process an optimization request. */
+        OptimizationInfo *Opt = (OptimizationInfo *)QM->Dequeue();
+        if (Opt)
+            Translator->GenTrace(env, Opt);//生成Trace
+
+        usleep(TIMEOUT_INTERVAL);
+    }
+
+    pthread_exit(nullptr);
+    return nullptr;
+}
 ```
+2. 构建Trace的过程(初始化一个TraceBuild类)
+
+```c
+TraceBuilder::TraceBuilder(IRFactory *IRF, OptimizationInfo *Opt)
+    : IF(IRF), Opt(Opt), Aborted(false), Attribute(A_None), Trace(nullptr)
+{
+    GraphNode *EntryNode = Opt->getCFG();
+    if (!EntryNode)
+        hqemu_error("invalid optimization request.\n");
+
+    /* Find unique nodes. */
+    NodeVec VisitStack;
+    NodeSet Visited;
+    VisitStack.push_back(EntryNode);
+    do {
+        GraphNode *Node = VisitStack.back();
+        VisitStack.pop_back();
+        if (Visited.find(Node) == Visited.end()) {
+            Visited.insert(Node);
+
+            setUniqueNode(Node);
+
+            for (auto Child : Node->getChildren())
+                VisitStack.push_back(Child);
+        }
+    } while (!VisitStack.empty());
+
+    /* Add entry node into the building queue. */
+    NodeQueue.push_back(EntryNode);
+
+    IF->CreateSession(this);
+    IF->CreateFunction();//LLVM的翻译是以一个function为对象，function中有多个基本块
+}
+
+```
+
+
 2. 生成QEMU的TCG IR : 直接调用QEMU的函数gen_intermediate_code()
 
 ```c
@@ -208,3 +297,7 @@ void TraceBuilder::ConvertToLLVMIR()
     }
 }
 ```
+
+#### LLVM后端的优化措施
+
+
