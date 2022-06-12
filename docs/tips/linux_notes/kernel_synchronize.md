@@ -6,7 +6,7 @@
 * 指令(操作码)前缀lock（0xf0）该前缀指令是原子指令
 * 指令前缀rep(0xf2, 0xf3)的汇编指令不是原子的。
 
-```
+```c
 linux 中的原子操作
    atomic_read()
    atomic_set()
@@ -34,7 +34,7 @@ linux中原子位处理函数
 
 1. linux的优化屏障barrier()宏
 
-```
+```c
 # define barrier() __asm__ __volatile__("": : :"memory")
   ##编译器保证barrier()之前的指令在之后的指令先执行
 ```
@@ -42,7 +42,7 @@ linux中原子位处理函数
 2. 内存屏障
 * 内存屏障的实现依赖于系统的体系结构，原子操作也起内存屏障的作用。
 
-```
+```c
 #ifdef CONFIG_X86_32
 #define mb() asm volatile(ALTERNATIVE("lock; addl $0,-4(%%esp)", "mfence", \
 				      X86_FEATURE_XMM2) ::: "memory", "cc")
@@ -97,8 +97,8 @@ linux中原子位处理函数
 ### 自旋锁
 
 1. 在自旋锁忙等期间，内核抢占还是有效的，被更高优先级的进程抢占。
-2. 
-```
+
+```c
 /* Non PREEMPT_RT kernels map spinlock to raw_spinlock */
 typedef struct spinlock {
 	union {
@@ -140,12 +140,12 @@ static inline void __raw_spin_lock(raw_spinlock_t *lock)
 	LOCK_CONTENDED(lock, do_raw_spin_trylock, do_raw_spin_lock);
 }
 
-
 ```
+
 3. 读/写自旋锁 rwlock_t
 * 读锁可以并发， 写锁必须独占，当锁被写者持有的时候，不可读。
 
-```
+```c
 typedef struct {
 	arch_rwlock_t raw_lock;
 #ifdef CONFIG_DEBUG_SPINLOCK
@@ -177,7 +177,7 @@ typedef struct {
 read进程来多少都可以进入到临界区。但是当临界区没有write进程的时候，
 write进程就可以立刻执行，不需要等待。
 
-```
+```c
  //顺序锁
 typedef struct {
 	/*
@@ -191,13 +191,13 @@ typedef struct {
 ```
 
 ### RCU
-![参考]：https://zhuanlan.zhihu.com/p/67520807
+[参考]：(https://zhuanlan.zhihu.com/p/67520807)
 
 
 
 ### 信号量
  
-```
+```c
 struct semaphore {
 	raw_spinlock_t		lock;
 	unsigned int		count;
@@ -237,7 +237,7 @@ extern void up(struct semaphore *sem);
 
 1. 读写信号量
 
-```
+```c
 struct rw_semaphore {
 	atomic_long_t count;
 	/*
@@ -271,7 +271,9 @@ struct rw_semaphore {
 * 为了防止在SMP上并发的访问信号量，使用补充原语：
 假设进程A分配一个信号量，并调用down()，并传递给进程B, 之后A撤销分配，
 摧毁信号量，B调用up()释放信号量，信号量已经不存在了。
-```
+
+
+```c
 struct completion {
 	unsigned int done;
 	struct swait_queue_head wait;

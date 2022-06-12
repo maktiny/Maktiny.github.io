@@ -19,7 +19,7 @@ author: Maktiny
 *  [进程调度](./docs/tips/linux_notes/process_manage.md)
 *  [进程间的通信](./docs/tips/linux_notes/process_communication.md)
 *  [进程的地址空间](./docs/tips/linux_notes/process_address.md)
-*  [内核同步()](./docs/tips/linux_notes/kernel_synchronize.md)
+*  [内核同步和中断](./docs/tips/linux_notes/kernel_synchronize.md)
 *  [内核时钟](./docs/tips/linux_notes/kernel_time.md)
 *  [字符设备和块设备](./docs/tips/linux_notes/cdev.md)
 *  [EXT3文件系统](./docs/tips/linux_notes/Ext4.md)
