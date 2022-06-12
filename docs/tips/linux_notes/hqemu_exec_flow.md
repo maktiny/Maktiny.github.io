@@ -1,5 +1,7 @@
 ### hqemu的hot path的NET算法
 1. hqemu的NET算法的实现，使用了两个helper函数
+
+
 ```c
 
 /* Helper function to perform trace prediction. */
@@ -9,6 +11,7 @@ void helper_NET_predict(CPUArchState *env, int id)
     Tracer.Predict(&tbs[id]);//tbs是TB的cache，可以通过tcg_out_hotpatch中传入的tb->id索引,
 }
 ```
+
 2. 在该函数中实现paper中的hot path的NET算法，对6-shape和O-shape型的hot path进行标记
 当TBs这个vector<TranslationBlock*> TBs数组达到满，或者遇到loop，就把数组放到OptimizeTrace()
 
