@@ -19,9 +19,9 @@ HQEMU的代码框架
                      |                                                                   |
                      |                                                             InitializeModule();
                      |                                                             InitializeType();//初始化IRFactory()的数据
-       			  |																InitializeTarget();//获取CPUArchState()的数据
-       			  | 															InitializeHelpers();
-       			  |																InitializeDisasm();
-                 WorkerFunc()/*让线程去执行该函数*/                                   IRFactory()//translator最重要的数据结构
+       		     |								   InitializeTarget();//获取CPUArchState()的数据
+       		     | 							            InitializeHelpers();
+       		     |							            InitializeDisasm();//使用LLVM的提供的MCdisassembler反汇编器类初始化一个反汇编器
+                 WorkerFunc()/*让线程去执行该函数*/                              IRFactory()//translator最重要的数据结构
    ```
 

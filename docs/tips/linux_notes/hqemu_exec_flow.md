@@ -157,7 +157,7 @@ void LLVMTranslator::GenTrace(CPUArchState *env, OptimizationInfo *Opt)
         Builder.getTrace()->setTransTime(&start, &end);
     }
 
-    Commit(Builder); //设置paper中的每个TB头的jump地址(直接跳转到优化后的TB地址去执行优化后的代码)
+    Commit(Builder); //设置paper中的每个TB头的jump地址(直接跳过profile 和predict代码段)
 }
 
 
@@ -263,7 +263,7 @@ void TraceBuilder::ConvertToTCGIR(CPUArchState *env)
     }
 
     tcg_func_start(&tcg_ctx, tb);
-    gen_intermediate_code(env, tb);//QEMU中生成中间码TCG IR的函数
+    gen_intermediate_code(env, tb);//QEMU中生成中间码TCG IR的函数,把生成的TCG TR放到一个cache中，然后ConvertLLVMIR从Cache中拿出TCG IR然后翻译成LLVM IR
     tcg_liveness_analysis(&tcg_ctx);
 }
 ```
@@ -289,7 +289,7 @@ void TraceBuilder::ConvertToLLVMIR()
         }
 
         IF->NI.setOp(op);
-        (IF->*OpcFunc[op->opc])(args);
+        (IF->*OpcFunc[op->opc])(args);//使用宏调用指令的翻译函数(op_ld16s_i32())完成TCG IR 到 LLVM IR的翻译
 
         if (isAborted()) {
             IF->DeleteSession();
@@ -297,6 +297,12 @@ void TraceBuilder::ConvertToLLVMIR()
         }
     }
 }
+//调用翻译函数的宏
+static IRFactory::FuncPtr OpcFunc[] = {
+#define DEF(name, oargs, iargs, cargs, flags) &IRFactory::op_ ## name,
+#include "tcg-opc.h"
+#undef DEF
+};
 ```
 
 #### LLVM后端的优化措施
