@@ -17,7 +17,7 @@ slab分配器在创建的不分配物理内存，只有在分配slab对象的时
 
 
 ```c
-//创建slab分配器(slab缓存池)
+//创建slab描述符
 struct kmem_cache *
 kmem_cache_create(const char *name, unsigned int size, unsigned int align,
 		slab_flags_t flags, void (*ctor)(void *))
@@ -140,7 +140,7 @@ struct array_cache {
 			 */
 };
 ```
-4. 创建slab描述符(slab分配器)
+4. 创建slab描述符
  ```c
     kmem_cache_create()
                 |
@@ -148,10 +148,10 @@ struct array_cache {
                 |
             __kmem_cache_alias()//判断是否可以复用现成的slab缓存池------>create_cache()
                 |                                                            |
-                |                                                       __kmem_cache_creae()//创建一个slab缓存池
-            返回slab缓存池                                                   |
+                |                                                       __kmem_cache_creae()//创建一个slab描述符
+            返回slab描述符                                                   |
                                                                             list_add()//添加到slab_cache链表中
-                                                                                | 返回slab缓存池
+                                                                                | 返回slab描述符
 calculate_slab_order()函数用来计算slab分配器需要的页面数
 ```
 
@@ -171,12 +171,12 @@ calculate_slab_order()函数用来计算slab分配器需要的页面数
                 |
             cache_alloc_refill()//否则找到array_cache->batchcount个对象重新填充per-cpu缓存
 	    //（kmem_cache_node中:先扫描空闲链表-->部分空闲链表)和其共享对象缓冲池
-            //中迁移一部分slab空闲对象到当前slab分配器进行分配，
+            //中迁移一部分slab空闲对象到当前slab描述符进行分配，
                 |
             cache_grow_begin()
-            如果还是失败，则增加slab的页数
+            如果还是失败，则创建slab分配器
                |
-           alloc_block()//使用该函数把新增加的slab页中的空闲对象迁移到当前slab中进行分配
+           alloc_block()//使用该函数把新创建的slab分配器中的空闲对象迁移到本地对象缓冲池中进行分配
 ```
 
 6. 释放slab缓存对象
@@ -189,7 +189,7 @@ calculate_slab_order()函数用来计算slab分配器需要的页面数
       ___cache_free()
          |
       cache_flusharray()//回收部分空闲对象或者销毁slab分配器
-//本地对象缓冲池中的空闲对象 >limit(空闲对象的最大值)----->迁移到共享对象缓冲池中 >limit ----->迁移到其他salb节点  >limit 销毁slab分配器（和分配相反）
+//本地对象缓冲池中的空闲对象 >limit(空闲对象的最大值)----->迁移到共享对象缓冲池中 >limit ----->迁移到salb节点的三个链表中 >limit 销毁slab分配器（和分配相反）
 
 ```
 7. slab的管理区（管理空闲对象）
@@ -235,9 +235,61 @@ if (set_objfreelist_slab_cache(cachep, size, flags)) {
 ```
 8. kmalloc()
 * 内核的kmalloc()函数实际上就是slab的机制，分配多少2 ** order字节的空间
+```c
 
+
+static __always_inline void *kmalloc(size_t size, gfp_t flags)
+{
+	if (__builtin_constant_p(size)) {
+#ifndef CONFIG_SLOB
+		unsigned int index;
+#endif
+		if (size > KMALLOC_MAX_CACHE_SIZE)
+			return kmalloc_large(size, flags);
+#ifndef CONFIG_SLOB
+		index = kmalloc_index(size);//可以找到使用哪个 slab 描述符
+
+		if (!index)
+			return ZERO_SIZE_PTR;
+
+		return kmem_cache_alloc_trace(
+				kmalloc_caches[kmalloc_type(flags)][index],
+				flags, size);
+#endif
+	}
+	return __kmalloc(size, flags);
+}
+
+
+
+void *__kmalloc(size_t size, gfp_t flags)
+{
+	struct kmem_cache *s;
+	void *ret;
+
+	if (unlikely(size > KMALLOC_MAX_CACHE_SIZE))
+		return kmalloc_large(size, flags);
+
+	s = kmalloc_slab(size, flags);//使用slab机制
+
+	if (unlikely(ZERO_OR_NULL_PTR(s)))
+		return s;
+
+	ret = slab_alloc(s, flags, _RET_IP_, size);
+
+	trace_kmalloc(_RET_IP_, ret, size, s->size, flags);
+
+	ret = kasan_kmalloc(s, ret, size, flags);
+
+	return ret;
+}
+EXPORT_SYMBOL(__kmalloc);
+
+```
 
 ```c
+例如要分配 30 字节的小块内存，可以用 kmalloc(30, GFP_KERNEL) 来实现，之后系统会从 kmalloc-32 slab 描述符中分配一个对象
+
 终端： cd /proc 
        sudo  cat  slabinfo
 就可以看到系统中salb信息
@@ -283,7 +335,7 @@ struct vm_struct {
 
 //所有vmalloc分配的区间都由vmlist管理
 static struct vm_struct *vmlist __initdata;
-//穿件虚拟区之前，需要构建vmap_area,
+//创建虚拟区之前，需要构建vmap_area,
 struct vmap_area {
 	unsigned long va_start;
 	unsigned long va_end;
