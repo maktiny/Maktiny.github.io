@@ -3,6 +3,8 @@
 2. 设备号在统一范围的所有设备文件由同一个设备驱动程序处理。
 3. 字符设备一般不用缓冲，使用硬件设备提供的寄存器和中断即可与cpu通信
 4. 声卡等顺序设备的缓冲使用循环缓冲区。
+
+
 ```c
   /*
   *     字符设备驱动程序描述符
@@ -18,7 +20,7 @@ struct cdev {
 	unsigned int count;
 } __randomize_layout;
 
-参考：static struct kobj_map *cdev_map;
+//参考：static struct kobj_map *cdev_map;
 
 
 /*
@@ -112,13 +114,10 @@ struct gendisk {
 	struct lockdep_map lockdep_map;
 	u64 diskseq;
 };
-
 ```
 
 ### 通用块层的 bio结构
-1. 
-2.
-3. 
+
 ```c
 /* bio中的每一个段是由bio_vec结构体描述*/
 struct bio_vec {
@@ -306,8 +305,6 @@ struct request {
 	rq_end_io_fn *end_io;
 	void *end_io_data;
 };
-
-
 ```
 
 ### IO调度算法
@@ -317,7 +314,7 @@ struct request {
 2. CFQ算法： 使用进程或线程组的PID做哈希，哈希值索引排序队列(排序和合并)，为每个进程分配一个排序队列(排序队列默认64个)
 ,相同进程分同步请求都放到一个请求队列，异步请求放到公共请求队列。每次执行一个进程的4个请求，进程之间的请求可以调度。
 
-3.Deadline算法：使用两对读/写IO请求队列（FIFO队列）,新请求按方向同时插入到两个队列中，
+3. Deadline算法：使用两对读/写IO请求队列（FIFO队列）,新请求按方向同时插入到两个队列中，
 ，从1中拿一个请求插到调度队列的时候，先检查2.中的是否超时，如果已经超过一个阀值，
 就会先处理超时请求。 这个阀值对于读请求时 5ms， 对于写请求时5s.
 
@@ -362,8 +359,6 @@ struct elevator_type
 	char icq_cache_name[ELV_NAME_MAX + 6];	/* elvname + "_io_cq" */
 	struct list_head list;
 };
-
-
 ```
 
 ### 块设备驱动程序
@@ -398,8 +393,6 @@ struct device_driver {
 	struct driver_private *p;
 };
 
-
-
  //块设备描述符
 struct block_device {
 	sector_t		bd_start_sect;
@@ -431,8 +424,6 @@ struct block_device {
 	bool			bd_make_it_fail;
 #endif
 } __randomize_layout;
-
-
 ```
 
 ### 通用块层

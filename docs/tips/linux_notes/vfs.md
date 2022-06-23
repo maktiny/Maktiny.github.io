@@ -6,8 +6,8 @@
 对文件的改动，是通过把文件具体内容所在的页，写回磁盘实现的(写时复制)。
 3. Linux内核能够发现真实的文件系统，那么必须先使用 register_filesystem() 函数注册文件系统
 ![2022-05-08 17-53-28 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1h215aob60zj30tp0mf0v5.jpg)
-```c
 
+```c
  //文件系统的类型
 struct file_system_type {
 	const char *name;
@@ -30,9 +30,9 @@ struct file_system_type {
 	struct hlist_head fs_supers;
 ................................
 }
-
-
 ```
+
+
 ### 挂载点
 1. mount 和vfsmount 以及spuer_block的关系
 ![2022-05-31 10-05-05 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1h2rd5sk808j30kg0dcwht.jpg)
@@ -229,7 +229,6 @@ u16			i_wb_frn_avg_time;
 1. 文件结构用于描述一个已打开的文件，其包含文件当前的读写偏移量，文件打开模式和文件操作函数列表等
 2. 一个(64位系统)进程默认可以打开64个文件.
 ```c
-
 struct file {
 	union {
 		struct llist_node	fu_llist;
@@ -315,7 +314,6 @@ struct fs_struct {
 	int in_exec;
 	struct path root, pwd;//指定了根目录和当前工作目录
 } __randomize_layout;
-
 ```
 
 
