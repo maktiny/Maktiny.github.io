@@ -189,6 +189,7 @@ struct rq {
 
 
 //系统定义了一个全局变量就绪队列rq runqueues[] 数组，数组中每个元素对应每个cpu
+//每个CPU都有一个就绪队列rq, 每个rq中都有各种调度策略的cfs_rq, rt_rq等
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 
 ```
@@ -453,16 +454,46 @@ __schedule()
 页表基址 |    |--load_new_mm_cr3()
          |    |--switch_ldt() //切换局部描述符表
          |                           |----| 
-         |---switch_to(prev, next, prev); | //进程切换的核心函,进程切换之后第一个prev指向next,所以需要第二个prev指向切换前的进程
+         |---switch_to(prev, next, prev); | //进程切换的核心函,进程切换之后第一个prev指向切换前的进程,第二个prev也指向切换前的进程
 栈空间   |    |--- __switch_to_asm((prev),| (next));	//汇编写的函数，做栈的切换(栈指针)，然后跳转到__switch_to()
          |            |---__switch_to()   | //做一些cpu上下文的切换(TLS,fpu,段寄存器等)
          |                                |
-         |                                |
-         |                         --------
+         |                                |//__switch_to()会返回prev指针，用来作为finish_task_switch()的参数，进行的pre进程的收尾处理
+         |                         --------//switch_to()函数两个prev参数，是因为进程切换之后进程栈会切换，prev指针会改变，传入两个prev指针，有一个会保存作为返回值
          | //进程A--->进程B        |
          |---finish_task_switch(prev)//该函数由切换之后的进程B执行
-            //该函数与prepare_task_switch()成对存在，做一些清理工作。
-  
+            //该函数与prepare_task_switch()成对存在，做一些进程A的清理工作。
+ // 因为 switch_to 之后执行的就是 next 进程，如果是新进程从 ret_from_fork 开始执行，如果不是，则从上次中断的 pc 开始执行，即 switch_to 后的指令
+//新建进程，第一次执行的切入点在 copy_thread 中指定的 ret_from_fork 中，因此，当 switch_to 切换到新建进程中时，新进程从 ret_from_fork 开始执行
+
+//ret_from_fork()使用汇编实现
+SYM_CODE_START(ret_from_fork)
+	UNWIND_HINT_EMPTY
+	movq	%rax, %rdi
+	call	schedule_tail			/* rdi: 'prev' task parameter */
+
+	testq	%rbx, %rbx			/* from kernel_thread? */
+	jnz	1f				/* kernel threads are uncommon */
+
+2:
+	UNWIND_HINT_REGS
+	movq	%rsp, %rdi
+	call	syscall_exit_to_user_mode	/* returns with IRQs disabled */
+	jmp	swapgs_restore_regs_and_return_to_usermode
+
+1:
+	/* kernel thread */
+	UNWIND_HINT_EMPTY
+	movq	%r12, %rdi
+	CALL_NOSPEC rbx
+	/*
+	 * A kernel thread is allowed to return here after successfully
+	 * calling kernel_execve().  Exit to userspace to complete the execve()
+	 * syscall.
+	 */
+	movq	$0, RAX(%rsp)
+	jmp	2b
+SYM_CODE_END(ret_from_fork)
 
 ```
 
