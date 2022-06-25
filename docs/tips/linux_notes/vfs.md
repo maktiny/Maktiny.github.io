@@ -266,7 +266,8 @@ struct fdtable { //初始化的时候指向files_struct中相应的成员变量
 	unsigned long *full_fds_bits;
 	struct rcu_head rcu;
 };
-
+//fdtable->fd 通常指向 files_struct->fd_array，该数组的索引就是文件描述符
+//通常第一个元素（索引为 0）时进程的标准输入文件，第二个是标准输出文件（索引为 1），第三个是标准错误文件（索引为 2）
 
 struct task_struct {
 

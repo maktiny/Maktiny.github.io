@@ -271,8 +271,6 @@ struct rw_semaphore {
 * 为了防止在SMP上并发的访问信号量，使用补充原语：
 假设进程A分配一个信号量，并调用down()，并传递给进程B, 之后A撤销分配，
 摧毁信号量，B调用up()释放信号量，信号量已经不存在了。
-
-
 ```c
 struct completion {
 	unsigned int done;
