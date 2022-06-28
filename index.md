@@ -41,6 +41,9 @@ author: Maktiny
 ## Tips
 *   [System V psABI：i386与x86_64函数传参的区别](./docs/tips/linux_notes/function_call.md)
 
+## Tools
+*   [工具的使用](./docs/tips/linux_notes/tools.md)
+
 ## Friends
 *   [niugenen](https://niugenen.github.io/)
 *   [limaomao820](https://limaomao821.github.io/)

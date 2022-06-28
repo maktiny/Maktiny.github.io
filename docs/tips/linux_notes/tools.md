@@ -3,18 +3,7 @@
 1. find . -name "*.c" | xargs rm -rfv  批量刪除當前目錄下的.c文件
 2. grep -rn "内容" 路径  #遍历路径下的所有文件，字符串匹配" "中的内容
 3. grep -rn  "sel" . | wc -l    #对匹配计数
-4. 
-5. 
-6. 
-7. 
-8. 
-9. 
-10.
-11.
-12.
-13.
-14.
-15.
+
 
 ## fmt
 1. echo ':x86_64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00:\xff\xff\xff\xff\xff\xfe\xfe\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/tmp/qemu-x86_64:C' > /proc/sys/fs/binfmt_misc/register
@@ -62,7 +51,6 @@ vim a.txt b.txt    同时编辑两个文件
 14. git apply --stat xxx.patch   #查看补丁情况
 15. git apply --check xxx.patch  ##查看补丁是否打上
 16. git format-patch HEAD^      #把最近的commit打成补丁
-
 
 17. git stash save "" #把当前的改动存起来，工作区恢复成干净的工作区
 18. git stash show #展示改动的文件
