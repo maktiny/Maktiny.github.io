@@ -26,7 +26,7 @@
            |
 boost_watermark()//设置ZONE_BOOSTED_WATERMARK标志位
 回退到rmqueue()的时候，早点唤醒kswapd线程,便于及时满足分配大内存快的需求。
-
+![2022-06-30 10-05-10 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1h3q1nvi0knj30lr0kfgog.jpg)
 ```
 
 2. 内核使用pglist_data来管理内存节点，每个内存节点被分成多个zone，页面分配按照zone的水位来管理，

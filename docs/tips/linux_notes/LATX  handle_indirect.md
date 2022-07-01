@@ -65,7 +65,7 @@
 
 1. 间接跳转是在generate_native_jmp_glue()处理的。在该函数中首先查找tb_jmp_cache[]数组，如果miss，则使用helper_lookup_tb()，该函数是一个宏，使用tb_lookup()函数注册。间接分支的查找也就是tb的查找，和tb的查找一样，使用快速的tb_jmp_cache[]数组查询，失败则使用tb_lookup()查找qht hash表查询。
 
-   ```c
+```c
    /* code_buf: start code address
     * n = 0: direct fall through jmp
     * n = 1: direct taken jmp
@@ -92,15 +92,15 @@
    #endif
    //CPUX86State的tb_jmp_cache_ptr指向CPUState的tb_jmp_cache，也就是全局的tb_jmp_cache
    
-   ```
+```
 
 1. 如果上面的查找仍然失败，则进行上下文切换， generate_context_switch_native_to_bt()切换到QEMU的翻译进程进行翻译下一个TB
 
-   > ```c
-   > /*
-   >          * if (next_tb != NULL) {goto fpu_rotate}
-   >          * else {
-   >          *   load eip to next_x86_addr
+```c
+    /*
+             * if (next_tb != NULL) {goto fpu_rotate}
+             * else {
+             *   load eip to next_x86_addr
    >          *   clear v0
    >          *   jump to epilogue
    >          * }
@@ -112,13 +112,15 @@
    > #3  0x000000ff0027b4c0 in tcg_prologue_init (s=0xff00609980 <tcg_init_ctx>) at ../tcg/tcg.c:1246
    > #4  0x000000ff002659f0 in main (argc=2, argv=0xffffff3458, envp=0xffffff3470)
    >     at ../linux-user/main.c:1085
-   > ```
+
+
+```
+
    
-   
-   
+
 2.  call 函数调用的处理：这里对call next(call的跳转指令是下一条指令)和callthunk(i386计算pc)做了相应的优化----不用退出到翻译器。
-   - 调整esp指针
-   - 计算返回地址并压栈(使用JR_RA优化)
+- 调整esp指针
+- 计算返回地址并压栈(使用JR_RA优化)
    - 如果使用影子栈，则把esp，return address等信息放到影子栈中
    - 使用QEMU函数tr_generate_exit_tb()生成退出tb,退出到BT(翻译器)
    
@@ -126,9 +128,9 @@
    
    
    
-   ## TB link
-   
-   ```c
+## TB link
+
+```c
    /*当TB已经翻译好（已链接）的时候走这条路径*/
    #0  latx_tb_set_jmp_target (tb=0xffe80005c0 <code_gen_buffer+40>, n=0, 
        next_tb=0xffe8000900 <code_gen_buffer+872>) at ../target/i386/latx/translator/translate.c:3041
@@ -154,10 +156,10 @@
    #6  0x000000ff00265a74 in main (argc=2, argv=0xffffff3468, envp=0xffffff3480)
        at ../linux-user/main.c:1098
    
-   ```
-   
+```
+
    tb_find()函数中找到下一个TB (TB2), 如果上一个TB (TB1) (last_tb) 存在则调用tb_add_jump()使两个TB连接起来。
-   
+
    ```c
    tb_find()
      |
@@ -167,25 +169,36 @@
           |
           tb_set_jmp_target()
    ```
-   
-   
-   
-   ## 寄存器映射
-   
+
+
+
+## TB-unlink
+
+
+
+## TB 无效
+
+* do_tb_phys_invalidate(TranslationBlock *tb, bool rm_from_page_list)  ---------------accel/tcg/translate-all.c
+* tb_flush(CPUState *cpu) ---将对应的tb_jump_cache数组清零
+
+
+
+## 寄存器映射
+
    1. 通常的执行过程是在 TB 的最后一条指令通过 $t9 来存储接下来继续执行的 EIP，在上下文切换的时候会将 $t9 写入到 CPUX865State 中。回到 QEMU 后即可继续开始查找、翻译、执行下一个 TB。
       $v0 用作函数返回值，对于 helper 函数的调用返回，同样是通过 $v0 来获取其返回值。 
-   
+
    ​    2. S_UD0 和 S_UD1 用于静态生成代码中的临时寄存器，详见【临时寄存器分配】
-   
+
    ```c
     /* last exec tb */
        REG_MAP_DEF(S_UD0, la_fp),
        /* next x86 addr */
        REG_MAP_DEF(S_UD1, la_r21),
    ```
+
    
-   
-   
+
    ```c
     IR2_OPND la_ret_opnd = V0_RENAME_OPND;
     IR2_OPND tb_ptr_opnd = ra_alloc_dbt_arg1();
@@ -193,7 +206,7 @@
        
    /*succ_x86_addr is set 1 for judging whether the instruction is direct jmp or condition jmp.*/
    ```
-   
+
    3. a1 存放着 CPUX86State 的基地址，a0 存放着待执行 TB 的 native codes 所在的地
    
    4. zero_ir2_opnd 即寄存器号为 0 的 IR2_OPND_IREG 类型的 IR2_OPND ，即 LoongArch 的 zero 寄存器
@@ -205,9 +218,9 @@
    7. n1_ir2_opnd 即 S0 寄存器，经过上下文切换后，其值总是 0xFFFFFFFF ，即一个低 32 位为 1 的掩码
    
    8. eflags_ir2_opnd 即 S8 寄存器，用于映射 EFLAGS 的内容
+
    
+
    
-   
-   
-   
+
    

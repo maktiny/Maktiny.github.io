@@ -8,7 +8,7 @@ slab分配器在创建的不分配物理内存，只有在分配slab对象的时
 * 仍然处于CPU高速缓存中的per_cpu对象
 * 现存slab中未使用的对象
 * 使用伙伴系统新分配的slab分配器中未使用的对象
-
+![2022-06-30 10-10-28 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1h3q1rgp8pij30n50gkn10.jpg)
 
 4. linux内核实现三种slab分配器机制
 * slab机制：一般的操作系统
