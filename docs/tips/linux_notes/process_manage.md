@@ -126,7 +126,7 @@ struct sched_entity {
 	struct sched_avg		avg;
 #endif
 };
-//就绪队列
+//就绪队列(按照红黑树组织)
 struct rq {
 	/* runqueue lock: */
 	raw_spinlock_t		__lock;
@@ -137,9 +137,9 @@ struct rq {
 	 */
 	unsigned int		nr_running;
 ...............................................
-	struct cfs_rq		cfs;
+	struct cfs_rq		cfs;//红黑树
 	struct rt_rq		rt;   //各个就绪队列中插入的特定调度器类的子就绪队列
-	struct dl_rq		dl;
+	struct dl_rq		dl; //红黑树
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	/* list of leaf cfs_rq on this CPU: */
@@ -198,7 +198,7 @@ DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 #### 调度策略
 
 1. linux把调度策略抽象成调度类：stop, deadline, realtime, CFS, idle
-2. 实时进程 > 完全公平进程 > 空闲进行
+2. 实时进程 > 完全公平进程 > 空闲进程
 3. 调度类在内核编译时候确认，没有运行时添加的机制
 
 | 调度类   | 调度策略                              | 使用范围                       | 说明                                                         |
@@ -300,7 +300,9 @@ struct load_weight {
 };
 
 //调度实体
-struct sched_entity {
+struct sched_rt_entity;//实时任务调度实体
+struct sched_dl_entitya;//DEADLINE任务调度实体
+struct sched_entity {   //普通任务调度实体
 	/* For load-balancing: */
 	struct load_weight		load;
 	struct rb_node			run_node;
@@ -401,7 +403,7 @@ struct rt_rq {
 
 * 调度时机
 1. 在阻塞操作中(信号量，等待队列)
-2. 中断返回，系统调用返回
+2. 中断返回exit_to_user_mode_loop()，系统调用返回
 3. 唤醒的进程进行调度检查
 
 ```c
@@ -453,7 +455,8 @@ __schedule()
          |    |
 页表基址 |    |--load_new_mm_cr3()
          |    |--switch_ldt() //切换局部描述符表
-         |                           |----| 
+         |
+	 |                           |----| 
          |---switch_to(prev, next, prev); | //进程切换的核心函,进程切换之后第一个prev指向切换前的进程,第二个prev也指向切换前的进程
 栈空间   |    |--- __switch_to_asm((prev),| (next));	//汇编写的函数，做栈的切换(栈指针)，然后跳转到__switch_to()
          |            |---__switch_to()   | //做一些cpu上下文的切换(TLS,fpu,段寄存器等)
