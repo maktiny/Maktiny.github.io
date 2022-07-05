@@ -680,7 +680,23 @@ struct irq_data {
 #endif
 	void			*chip_data;
 };
+/*
+众多的中断irq_desc则采取类似于内存管理中所用到的基数树radix tree的方式进行管理。
+这种结构对于从某个整型 key 找到 value 速度很快，中断信号 irq 是这个整数。
+通过它，我们很快就能定位到对应的 irq_desc
+*/
 
+static RADIX_TREE(irq_desc_tree, GFP_KERNEL);
+
+static void irq_insert_desc(unsigned int irq, struct irq_desc *desc)
+{
+	radix_tree_insert(&irq_desc_tree, irq, desc);
+}
+
+struct irq_desc *irq_to_desc(unsigned int irq)
+{
+	return radix_tree_lookup(&irq_desc_tree, irq);
+}
 //struct irq_chip - hardware interrupt chip descriptor
 //IRQ控制器，该结构体描述了体系结构的无关的IRQ控制器，函数指针提供的函数改变IRQ的状态。
 struct irq_chip {
@@ -736,9 +752,143 @@ struct irq_chip {
 };
 
 ```
+2. 单个CPU拥有256（8位）IDT，即能处理256个中断，定义为NR_VECTORS
+3. CPU处理的中断分为几类
+* 0到31位为系统陷入或者异常，这些属于无法屏蔽的中断，必须进行处理
+* 32到127位为设备中断
+* 128位即我们常说的int80系统调用中断
+* 129至INVALIDATE_TLB_VECTOR_START也用来保存设备中断
+* INVALIDATE_TLB_VECTOR_START至255作为特殊中断
+* 64位架构下每个CPU有独立的IDT表，而32位则共享一张表
+```c
+/*0-31位中断或者异常*/
 
-2. 在内核中，可以通过__setup_irq() 函数来注册一个中断处理入口
+#define X86_TRAP_DE		 0	/* Divide-by-zero */
+#define X86_TRAP_DB		 1	/* Debug */
+#define X86_TRAP_NMI		 2	/* Non-maskable Interrupt */
+#define X86_TRAP_BP		 3	/* Breakpoint */
+#define X86_TRAP_OF		 4	/* Overflow */
+#define X86_TRAP_BR		 5	/* Bound Range Exceeded */
+#define X86_TRAP_UD		 6	/* Invalid Opcode */
+#define X86_TRAP_NM		 7	/* Device Not Available */
+#define X86_TRAP_DF		 8	/* Double Fault */
+#define X86_TRAP_OLD_MF		 9	/* Coprocessor Segment Overrun */
+#define X86_TRAP_TS		10	/* Invalid TSS */
+#define X86_TRAP_NP		11	/* Segment Not Present */
+#define X86_TRAP_SS		12	/* Stack Segment Fault */
+#define X86_TRAP_GP		13	/* General Protection Fault */
+#define X86_TRAP_PF		14	/* Page Fault */
+#define X86_TRAP_SPURIOUS	15	/* Spurious Interrupt */
+#define X86_TRAP_MF		16	/* x87 Floating-Point Exception */
+#define X86_TRAP_AC		17	/* Alignment Check */
+#define X86_TRAP_MC		18	/* Machine Check */
+#define X86_TRAP_XF		19	/* SIMD Floating-Point Exception */
+#define X86_TRAP_VE		20	/* Virtualization Exception */
+#define X86_TRAP_CP		21	/* Control Protection Exception */
+#define X86_TRAP_VC		29	/* VMM Communication Exception */
+#define X86_TRAP_IRET		32	/* IRET Exception */
 
+
+/*中断向量表*/
+static const __initconst struct idt_data def_idts[] = {
+	INTG(X86_TRAP_DE,		asm_exc_divide_error),
+	ISTG(X86_TRAP_NMI,		asm_exc_nmi, IST_INDEX_NMI),
+	INTG(X86_TRAP_BR,		asm_exc_bounds),
+	INTG(X86_TRAP_UD,		asm_exc_invalid_op),
+	INTG(X86_TRAP_NM,		asm_exc_device_not_available),
+	INTG(X86_TRAP_OLD_MF,		asm_exc_coproc_segment_overrun),
+	INTG(X86_TRAP_TS,		asm_exc_invalid_tss),
+	INTG(X86_TRAP_NP,		asm_exc_segment_not_present),
+	INTG(X86_TRAP_SS,		asm_exc_stack_segment),
+	INTG(X86_TRAP_GP,		asm_exc_general_protection),
+	INTG(X86_TRAP_SPURIOUS,		asm_exc_spurious_interrupt_bug),
+	INTG(X86_TRAP_MF,		asm_exc_coprocessor_error),
+	INTG(X86_TRAP_AC,		asm_exc_alignment_check),
+	INTG(X86_TRAP_XF,		asm_exc_simd_coprocessor_error),
+
+#ifdef CONFIG_X86_32
+	TSKG(X86_TRAP_DF,		GDT_ENTRY_DOUBLEFAULT_TSS),
+#else
+	ISTG(X86_TRAP_DF,		asm_exc_double_fault, IST_INDEX_DF),
+#endif
+	ISTG(X86_TRAP_DB,		asm_exc_debug, IST_INDEX_DB),
+
+#ifdef CONFIG_X86_MCE
+	ISTG(X86_TRAP_MC,		asm_exc_machine_check, IST_INDEX_MCE),
+#endif
+
+#ifdef CONFIG_AMD_MEM_ENCRYPT
+	ISTG(X86_TRAP_VC,		asm_exc_vmm_communication, IST_INDEX_VC),
+#endif
+
+	SYSG(X86_TRAP_OF,		asm_exc_overflow),
+#if defined(CONFIG_IA32_EMULATION)
+	SYSG(IA32_SYSCALL_VECTOR,	entry_INT80_compat),
+#elif defined(CONFIG_X86_32)
+	SYSG(IA32_SYSCALL_VECTOR,	entry_INT80_32),
+#endif
+};
+```
+4. 中断部分开始于trap_init()，这里会填写IDT描述符构成中断向量表
+```c
+/*这几个初始化函数的关系没搞明白*/
+void __init trap_init(void)
+{
+	/* Init cpu_entry_area before IST entries are set up */
+	setup_cpu_entry_areas();
+
+	/* Init GHCB memory pages when running as an SEV-ES guest */
+	sev_es_init_vc_handling();
+
+	/* Initialize TSS before setting up traps so ISTs work */
+	cpu_init_exception_handling();
+	/* Setup traps as cpu_init() might #GP */
+	idt_setup_traps();
+	cpu_init();
+}
+
+void __init idt_setup_traps(void) //初始化中断
+{
+	idt_setup_from_table(idt_table, def_idts, ARRAY_SIZE(def_idts), true);
+}
+
+void __init init_IRQ(void)
+{
+	int i;
+
+	/*
+	 * On cpu 0, Assign ISA_IRQ_VECTOR(irq) to IRQ 0..15.
+	 * If these IRQ's are handled by legacy interrupt-controllers like PIC,
+	 * then this configuration will likely be static after the boot. If
+	 * these IRQs are handled by more modern controllers like IO-APIC,
+	 * then this vector space can be freed and re-used dynamically as the
+	 * irq's migrate etc.
+	 */
+	 //初始化平台相关的0-31号中断
+	for (i = 0; i < nr_legacy_irqs(); i++)
+		per_cpu(vector_irq, 0)[ISA_IRQ_VECTOR(i)] = irq_to_desc(i);
+
+	BUG_ON(irq_init_percpu_irqstack(smp_processor_id()));
+
+	x86_init.irqs.intr_init();
+}
+
+void __init native_init_IRQ(void)
+{
+	/* Execute any quirks before the call gates are initialised: */
+	x86_init.irqs.pre_vector_init();
+
+	idt_setup_apic_and_irq_gates();//会调用idt_setup_from_table()进行初始化
+	lapic_assign_system_vectors();//进行local APIC的初始化
+
+	if (!acpi_ioapic && !of_ioapic && nr_legacy_irqs()) {
+		/* IRQ2 is cascade interrupt to second interrupt controller */
+		if (request_irq(2, no_action, IRQF_NO_THREAD, "cascade", NULL))
+			pr_err("%s: request_irq() failed\n", "cascade");
+	}
+}
+```
+4. 在内核中，可以通过__setup_irq() 函数来注册一个中断处理入口
 
 ```c
 int setup_percpu_irq(unsigned int irq, struct irqaction *act)
@@ -763,9 +913,36 @@ int setup_percpu_irq(unsigned int irq, struct irqaction *act)
 
 ```
 3. 当一个中断发生时，中断控制层会发送信号给CPU，CPU收到信号会中断当前的执行，转而执行中断处理过程。中断处理过程首先会保存寄存器的值到栈中
+* 中断根据触发方式分成： 边沿触发 handle_edge_irq() ， 水平触发 handle_level_irq()
+* handle_level_irq() 和handle_edge_irq()都会调用handle_irq_event()进行处理
 
 ```c
-handle_irq_event()--->handle_irq_event_percpu()--->__handle_irq_event_percpu()----->然后调用中断注册时候action的处理函数进行中断处理
+handle_irq_event()--->handle_irq_event_percpu()--->__handle_irq_event_percpu()----->然后遍历中断注册时候action的处理函数进行中断处理
+
+
+
+struct legacy_pic default_legacy_pic = { //初始化传统的PIC线
+	.nr_legacy_irqs = NR_IRQS_LEGACY,
+	.chip  = &i8259A_chip,
+	.mask = mask_8259A_irq,
+	.unmask = unmask_8259A_irq,
+	.mask_all = mask_8259A,
+	.restore_mask = unmask_8259A,
+	.init = init_8259A,
+	.probe = probe_8259A,
+	.irq_pending = i8259A_irq_pending,
+	.make_irq = make_8259A_irq,
+};
+
+static void make_8259A_irq(unsigned int irq)
+{
+	disable_irq_nosync(irq);
+	io_apic_irqs &= ~(1<<irq);
+	/*设置8259芯片为水平触发中断*/
+	irq_set_chip_and_handler(irq, &i8259A_chip, handle_level_irq);
+	enable_irq(irq);
+	lapic_assign_legacy_vector(irq, true);
+}
 ```
 
 ### softirq 机制

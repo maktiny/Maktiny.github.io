@@ -16,7 +16,7 @@ struct cdev {
 	struct module *owner;
 	const struct file_operations *ops;
 	struct list_head list;
-	dev_t dev;
+	dev_t dev;//设备号
 	unsigned int count;
 } __randomize_layout;
 
@@ -28,7 +28,7 @@ struct cdev {
 *函数，把指定的设备号范围加入到散列表中，每注册一个cdev
 *字符设备驱动程序，就需要把他插入到cdev_map中
 */
-static struct kobj_map *cdev_map;
+static struct kobj_map *cdev_map;//用于维护所有字符设备驱动
 struct kobj_map {
 	struct probe {
 		struct probe *next;
@@ -57,7 +57,7 @@ static struct char_device_struct {
 	struct cdev *cdev;		/* will die */
 } *chrdevs[CHRDEV_MAJOR_HASH_SIZE];
 
-
+register_chrdev()实际调用__register_chrdev()，该函数会进行字符设备的注册操作
 regietr_chrdev_region()和alloc_cgrdev_region()//分配一个范围的设备号
 ```
 
@@ -424,6 +424,17 @@ struct block_device {
 	bool			bd_make_it_fail;
 #endif
 } __randomize_layout;
+```
+1. Linux 将块设备的 block_device 和 bdev 文件系统的块设备的 inode通过 struct bdev_inode 进行关联
+
+```c
+
+struct bdev_inode {
+	struct block_device bdev;
+	struct inode vfs_inode;
+};
+
+
 ```
 
 ### 通用块层
