@@ -288,6 +288,61 @@ struct swait_queue_head {
 ```
 
 ### 信号
+
+##### linux kernel支持的信号
+1. 信号可以在任何时候发送给某一进程，进程需要为这个信号配置信号处理函数。当某个信号发生的时候，就默认执行这个函数就可以了 
+2. 中断和信号都可能源于硬件和软件，但是中断处理函数注册于内核之中，由内核中运行，而信号的处理函数注册于用户态，
+内核收到信号后会根据当前任务task_struct结构体中的信号相关数据结构找寻对应的处理函数并最终在用户态处理中断作用于内核全局，
+而信号作用于当前任务（进程）。即信号影响的往往是一个进程，而中断处理如果出现问题则会导致整个Linux内核的崩溃
+
+```c
+    命令行： man signal
+     /*linux kernel 支持的标准信号*/
+        Signal      Standard   Action   Comment
+       ────────────────────────────────────────────────────────────────────────
+       SIGABRT      P1990      Core    Abort signal from abort(3)
+       SIGALRM      P1990      Term    Timer signal from alarm(2)
+       SIGBUS       P2001      Core    Bus error (bad memory access)
+       SIGCHLD      P1990      Ign     Child stopped or terminated
+       SIGCLD         -        Ign     A synonym for SIGCHLD
+       SIGCONT      P1990      Cont    Continue if stopped
+       SIGEMT         -        Term    Emulator trap
+       SIGFPE       P1990      Core    Floating-point exception
+       SIGHUP       P1990      Term    Hangup detected on controlling terminal
+                                       or death of controlling process
+       SIGILL       P1990      Core    Illegal Instruction
+       SIGINFO        -                A synonym for SIGPWR
+       SIGINT       P1990      Term    Interrupt from keyboard
+       SIGIO          -        Term    I/O now possible (4.2BSD)
+       SIGIOT         -        Core    IOT trap. A synonym for SIGABRT
+       SIGKILL      P1990      Term    Kill signal
+       SIGLOST        -        Term    File lock lost (unused)
+       SIGPIPE      P1990      Term    Broken pipe: write to pipe with no
+                                       readers; see pipe(7)
+       SIGPOLL      P2001      Term    Pollable event (Sys V).
+                                       Synonym for SIGIO
+       SIGPROF      P2001      Term    Profiling timer expired
+       SIGPWR         -        Term    Power failure (System V)
+       SIGQUIT      P1990      Core    Quit from keyboard
+       SIGSEGV      P1990      Core    Invalid memory reference
+       SIGSTKFLT      -        Term    Stack fault on coprocessor (unused)
+       SIGSTOP      P1990      Stop    Stop process
+       SIGTSTP      P1990      Stop    Stop typed at terminal
+       SIGSYS       P2001      Core    Bad system call (SVr4);
+                                       see also seccomp(2)
+       SIGTERM      P1990      Term    Termination signal
+       SIGTRAP      P2001      Core    Trace/breakpoint trap
+       SIGTTIN      P1990      Stop    Terminal input for background process
+
+       SIGTTOU      P1990      Stop    Terminal output for background process
+       SIGUNUSED      -        Core    Synonymous with SIGSYS
+       SIGURG       P2001      Ign     Urgent condition on socket (4.2BSD)
+       SIGUSR1      P1990      Term    User-defined signal 1
+       SIGUSR2      P1990      Term    User-defined signal 2
+       SIGVTALRM    P2001      Term    Virtual alarm clock (4.2BSD)
+       SIGXCPU      P2001      Core    CPU time limit exceeded (4.2BSD);
+
+```
 1. 在task_struct结构体中与信号相关的元素
 
 ```c
@@ -380,6 +435,137 @@ pid 小于-1时，信号将送往以-pid为组标识的进程
 
 
 kill_something_info() 最后会调用send_signal()-->__send_signal()把信号放到信号队列里去。
+
+
+static int __send_signal(int sig, struct kernel_siginfo *info, struct task_struct *t,
+			enum pid_type type, bool force)
+{
+	struct sigpending *pending;
+	struct sigqueue *q;
+	int override_rlimit;
+	int ret = 0, result;
+
+	assert_spin_locked(&t->sighand->siglock);
+
+	result = TRACE_SIGNAL_IGNORED;
+	if (!prepare_signal(sig, t, force))
+		goto ret;
+
+	pending = (type != PIDTYPE_PID) ? &t->signal->shared_pending : &t->pending;
+	/*
+	 * Short-circuit ignored signals and support queuing
+	 * exactly one non-rt signal, so that we can get more
+	 * detailed information about the cause of the signal.
+	 */
+	result = TRACE_SIGNAL_ALREADY_PENDING;
+	if (legacy_queue(pending, sig))
+		goto ret;
+/**
+
+   legacy_queue()中主要是判断是否为可靠信号，判断的依据是当信号小于 SIGRTMIN也即 32 的时候，
+如果我们发现这个信号已经在集合里面了，就直接退出。这里之所以前32位信号称之为不可靠信号其实是历史遗留问题，
+早期UNIX系统只定义了32种信号，而这些经过检验被定义为不可靠信号，主要指的是进程可能对信号做出错误的反应
+以及信号可能丢失：UNIX系统每次信号处理完需要重新安装信号，因此容易出现各种错误。linux也支持不可靠信号，
+但是对不可靠信号机制做出了改进：在调用完信号处理函数后，不必重新调用该信号的安装函数(信号安装函数是在可靠机制上是实现的)。
+因此，linux下的不可靠信号问题主要指的是信号可能丢失。
+  这里之所以会出现信号丢失，是因为这些信号可能会频繁快速出现。这样信号能够处理多少，和信号处理函数什么时候被调用，
+信号多大频率被发送，都有关系，而信号处理函数的调用时间也是不确定的，因此这种信号称之为不可靠信号。与之相对的，其他信号称之为可靠信号，支持排队执行
+
+          不可靠信号放入信号集sigset_t  可靠信号我们通过__sigqueue_alloc()分配sigqueue对象，并挂载在sigpending中的链表上
+
+*/
+	result = TRACE_SIGNAL_DELIVERED;
+	/*
+	 * Skip useless siginfo allocation for SIGKILL and kernel threads.
+	 */
+	if ((sig == SIGKILL) || (t->flags & PF_KTHREAD))
+		goto out_set;
+
+	/*
+	 * Real-time signals must be queued if sent by sigqueue, or
+	 * some other real-time mechanism.  It is implementation
+	 * defined whether kill() does so.  We attempt to do so, on
+	 * the principle of least surprise, but since kill is not
+	 * allowed to fail with EAGAIN when low on memory we just
+	 * make sure at least one signal gets delivered and don't
+	 * pass on the info struct.
+	 */
+	if (sig < SIGRTMIN)
+		override_rlimit = (is_si_special(info) || info->si_code >= 0);
+	else
+		override_rlimit = 0;
+
+	q = __sigqueue_alloc(sig, t, GFP_ATOMIC, override_rlimit, 0);
+
+	if (q) {
+		list_add_tail(&q->list, &pending->list);
+		switch ((unsigned long) info) {
+		case (unsigned long) SEND_SIG_NOINFO:
+			clear_siginfo(&q->info);
+			q->info.si_signo = sig;
+			q->info.si_errno = 0;
+			q->info.si_code = SI_USER;
+			q->info.si_pid = task_tgid_nr_ns(current,
+							task_active_pid_ns(t));
+			rcu_read_lock();
+			q->info.si_uid =
+				from_kuid_munged(task_cred_xxx(t, user_ns),
+						 current_uid());
+			rcu_read_unlock();
+			break;
+		case (unsigned long) SEND_SIG_PRIV:
+			clear_siginfo(&q->info);
+			q->info.si_signo = sig;
+			q->info.si_errno = 0;
+			q->info.si_code = SI_KERNEL;
+			q->info.si_pid = 0;
+			q->info.si_uid = 0;
+			break;
+		default:
+			copy_siginfo(&q->info, info);
+			break;
+		}
+	} else if (!is_si_special(info) &&
+		   sig >= SIGRTMIN && info->si_code != SI_USER) {
+		/*
+		 * Queue overflow, abort.  We may abort if the
+		 * signal was rt and sent by user using something
+		 * other than kill().
+		 */
+		result = TRACE_SIGNAL_OVERFLOW_FAIL;
+		ret = -EAGAIN;
+		goto ret;
+	} else {
+		/*
+		 * This is a silent loss of information.  We still
+		 * send the signal, but the *info bits are lost.
+		 */
+		result = TRACE_SIGNAL_LOSE_INFO;
+	}
+
+out_set:
+	signalfd_notify(t, sig);
+	sigaddset(&pending->signal, sig);
+
+	/* Let multiprocess signals appear after on-going forks */
+	if (type > PIDTYPE_TGID) {
+		struct multiprocess_signals *delayed;
+		hlist_for_each_entry(delayed, &t->signal->multiprocess, node) {
+			sigset_t *signal = &delayed->signal;
+			/* Can't queue both a stop and a continue signal */
+			if (sig == SIGCONT)
+				sigdelsetmask(signal, SIG_KERNEL_STOP_MASK);
+			else if (sig_kernel_stop(sig))
+				sigdelset(signal, SIGCONT);
+			sigaddset(signal, sig);
+		}
+	}
+
+	complete_signal(sig, t, type);
+ret:
+	trace_signal_generate(sig, info, t, type != PIDTYPE_PID, result);
+	return ret;
+}
 ```
 
 3. 内核触发信号处理函数是在arch_do_signal_or_restart()--->handle_signal()
@@ -402,7 +588,9 @@ void arch_do_signal_or_restart(struct pt_regs *regs, bool has_signal)
 先返回到用户态执行信号处理程序，执行完信号处理程序后再返回到内核态，再在内核态完成收尾工作
 ![2022-05-10 14-27-47 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1h23aoyun8ej30so0cxtbj.jpg)
 handle_signal()--->setup_rt_frame()--->ia32_setup_frame()函数来构建这个过程的(从用户态返回到内核态)运行环境（其实就是修改内核栈和用户栈相应的数据来完成）
-
+* 当信号来的时候，内核并不直接处理这个信号，而是设置一个标识位 TIF_SIGPENDING来表示已经有信号等待处理。同样等待系统调用结束，或者中断处理结束，
+从内核态返回用户态的时候再进行信号的处理
+![信号处理流程图(来自：https://tianyuch.gitbook.io/dive-into-linux/)](http://tva1.sinaimg.cn/large/0070vHShly1h3w3iwkpbwj34k42cshdt.jpg)
 ```c
 
 int ia32_setup_frame(int sig, struct ksignal *ksig,
