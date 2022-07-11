@@ -117,7 +117,7 @@ struct gendisk {
 ```
 
 ### 通用块层的 bio结构
-
+1. 通常用一个bio结构体来对应一个I/O请求
 ```c
 /* bio中的每一个段是由bio_vec结构体描述*/
 struct bio_vec {
@@ -127,7 +127,7 @@ struct bio_vec {
 };
  
 struct bvec_iter {
-	sector_t		bi_sector;	/* 扇区：x86中扇区一般512B,也由更大的。device address in 512 byte
+	sector_t		bi_sector;	/* 扇区：x86中扇区一般512B,也有更大的。device address in 512 byte
 						   sectors */
 	unsigned int		bi_size;	/* residual I/O count */
 
@@ -182,8 +182,130 @@ struct bio {
 };
 
 ```
+### 通用块层
+1. 将对不同块设备的操作转换成对逻辑数据块的操作，也就是将不同的块设备都抽象成是一个数据块数组，而文件系统就是对这些数据块进行管理
+2. 通用块层就是具体文件系统与具体的存储设备驱动之间的接口。由于不同的存储设备对硬件块的抽象不同，驱动也不同,
+通用快层的出现就是为了屏蔽这种差异，像EXT4/NTFS这样的文件系统对任何的存储设备都可用，只需要存储设备的驱动开发遵从
+通用块层的设计接口，把对文件的操作向通用块层注册即可。
+3. 通用块层 将对不同块设备的操作转换成对逻辑数据块的操作，也就是将不同的块设备都抽象成是一个数据块数组，而文件系统就是对这些数据块进行管理
+4. 通过对设备进行抽象后，不管是磁盘还是机械硬盘，对于文件系统都可以使用相同的接口对逻辑数据块进行读写操作
+![2022-05-08 19-19-53 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1h217tfgnesj30or0k70vg.jpg)
 
-1. 请求队列struct request_queue中存放请求request
+5. 通用块层使用 ll_rw_block()对逻辑块进行读写
+```c
+//bufer_head结构代表一个要进行读或者写的数据块, 一个buffer_head对应一个bio（需要用buffer_head去初始化bio结构体）
+struct buffer_head {
+	unsigned long b_state;		/* buffer state bitmap (see above) */
+	struct buffer_head *b_this_page;/* circular list of page's buffers */
+	struct page *b_page;		/* the page this bh is mapped to */
+
+	sector_t b_blocknr;		/* start block number */
+	size_t b_size;			/* size of mapping */
+	char *b_data;			/* pointer to data within the page */
+
+	struct block_device *b_bdev;
+	bh_end_io_t *b_end_io;		/* I/O completion */
+ 	void *b_private;		/* reserved for b_end_io */
+	struct list_head b_assoc_buffers; /* associated with another mapping */
+	struct address_space *b_assoc_map;	/* mapping this buffer is
+						   associated with */
+	atomic_t b_count;		/* users using this buffer_head */
+	spinlock_t b_uptodate_lock;	/* Used by the first bh in a page, to
+					 * serialise IO completion of other
+					 * buffers in the page */
+};
+
+void ll_rw_block(int op, int op_flags,  int nr, struct buffer_head *bhs[])
+{
+	int i;
+
+	for (i = 0; i < nr; i++) {
+		struct buffer_head *bh = bhs[i];
+
+		if (!trylock_buffer(bh))
+			continue;
+		if (op == WRITE) {//写
+			if (test_clear_buffer_dirty(bh)) {
+				bh->b_end_io = end_buffer_write_sync;
+				get_bh(bh);//增加buffer_head的引用计数，
+				submit_bh(op, op_flags, bh);//将该buffer_head调用submit_bio()提交给I/O调度层，然后进行写入磁盘
+				continue;
+			}
+		} else {
+			if (!buffer_uptodate(bh)) {
+				bh->b_end_io = end_buffer_read_sync;
+				get_bh(bh);
+				submit_bh(op, op_flags, bh);
+				continue;
+			}
+		}
+		unlock_buffer(bh);
+	}
+}
+EXPORT_SYMBOL(ll_rw_block);
+
+
+int submit_bh(int op, int op_flags, struct buffer_head *bh)
+{
+	return submit_bh_wbc(op, op_flags, bh, 0, NULL);
+}
+EXPORT_SYMBOL(submit_bh);
+
+
+
+static int submit_bh_wbc(int op, int op_flags, struct buffer_head *bh,
+			 enum rw_hint write_hint, struct writeback_control *wbc)
+{
+	struct bio *bio;
+
+	BUG_ON(!buffer_locked(bh));
+	BUG_ON(!buffer_mapped(bh));
+	BUG_ON(!bh->b_end_io);
+	BUG_ON(buffer_delay(bh));
+	BUG_ON(buffer_unwritten(bh));
+
+	/*
+	 * Only clear out a write error when rewriting
+	 */
+	if (test_set_buffer_req(bh) && (op == REQ_OP_WRITE))
+		clear_buffer_write_io_error(bh);
+
+	bio = bio_alloc(GFP_NOIO, 1);
+
+	fscrypt_set_bio_crypt_ctx_bh(bio, bh, GFP_NOIO);
+
+	bio->bi_iter.bi_sector = bh->b_blocknr * (bh->b_size >> 9);
+	bio_set_dev(bio, bh->b_bdev);
+	bio->bi_write_hint = write_hint;
+
+	bio_add_page(bio, bh->b_page, bh->b_size, bh_offset(bh));
+	BUG_ON(bio->bi_iter.bi_size != bh->b_size);
+
+	bio->bi_end_io = end_bio_bh_io_sync;
+	bio->bi_private = bh;
+
+	if (buffer_meta(bh))
+		op_flags |= REQ_META;
+	if (buffer_prio(bh))
+		op_flags |= REQ_PRIO;
+	bio_set_op_attrs(bio, op, op_flags);
+
+	/* Take care of bh's that straddle the end of the device */
+	guard_bio_eod(bio);
+
+	if (wbc) {
+		wbc_init_bio(wbc, bio);
+		wbc_account_cgroup_owner(wbc, bh->b_page, bh->b_size);
+	}
+
+	submit_bio(bio);
+	return 0;
+}
+
+submit_bio()-->submit_bio_noacct()--->__submit_bio_noacct()-->__submit_bio()调用gendisk硬盘注册时候函数submit_bio()把bio放到请求队列中
+
+```
+6. 请求队列struct request_queue中存放请求request
 
 ```c
 struct request {
@@ -437,12 +559,4 @@ struct bdev_inode {
 
 ```
 
-### 通用块层
-1. 将对不同块设备的操作转换成对逻辑数据块的操作，也就是将不同的块设备都抽象成是一个数据块数组，而文件系统就是对这些数据块进行管理
-2. 通用块层就是具体文件系统与具体的存储设备驱动之间的接口。由于不同的存储设备对硬件块的抽象不同，驱动也不同,
-通用快层的出现就是为了屏蔽这种差异，像EXT4/NTFS这样的文件系统对任何的存储设备都可用，只需要存储设备的驱动开发遵从
-通用块层的设计接口，把对文件的操作向通用块层注册即可。
-3. 通用块层 将对不同块设备的操作转换成对逻辑数据块的操作，也就是将不同的块设备都抽象成是一个数据块数组，而文件系统就是对这些数据块进行管理
-4. 通过对设备进行抽象后，不管是磁盘还是机械硬盘，对于文件系统都可以使用相同的接口对逻辑数据块进行读写操作
-![2022-05-08 19-19-53 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1h217tfgnesj30or0k70vg.jpg)
 
