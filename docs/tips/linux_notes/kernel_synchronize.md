@@ -759,7 +759,7 @@ struct pt_regs {
 处理程序对数据结构的并发访问。所以禁止本地中断与
 自旋锁结合使用。
 
-```
+```c
 #define local_irq_enable()	do { raw_local_irq_enable(); } while (0)  //使用sti指令设置eflag寄存器实现
 #define local_irq_disable()	do { raw_local_irq_disable(); } while (0) // cli
 #define local_irq_save(flags)	do { raw_local_irq_save(flags); } while (0) // pushf 压栈指令
@@ -770,18 +770,24 @@ struct pt_regs {
 
 
 ### 禁止和激活可延迟函数（软中断和tasklet）
- 
- ```
-    local_bh_enable() //打开可延迟函数，当preempt_count字段中的硬中断和软终端计数器
+1. 软中断单个CPU上是串行执行的，因为__do_softirq()在执行中断下半部的的时候，是调用local_bh_disable()把本地的softirq关闭的
+2. 软中断是可以在多个CPU上并行执行的。
+
+
+```c
+    local_bh_enable() //打开中断上半部，当preempt_count字段中的硬中断和软中断计数器
                       //都为0,并且有软中断挂起，调用do_softirq()打开软中断。
 
 
-    local_bh_disable() //禁止可延迟函数
- ```
+    local_bh_disable() //关闭中断下本部
+
+
+```
  
 ### 中断 IRQ
 1. 在内核中每条IRQ线使用irq_desc描述
- ```c
+
+```c
 
 struct irq_desc {
 	struct irq_common_data	irq_common_data;
@@ -940,7 +946,7 @@ struct irq_chip {
 };
 
 ```
-2. 单个CPU拥有256（8位）IDT，即能处理256个中断，定义为NR_VECTORS
+2. 单个CPU 能处理256个中断，定义为NR_VECTORS(中断向量)
 3. CPU处理的中断分为几类
 * 0到31位为系统陷入或者异常，这些属于无法屏蔽的中断，必须进行处理
 * 32到127位为设备中断
@@ -948,6 +954,7 @@ struct irq_chip {
 * 129至INVALIDATE_TLB_VECTOR_START也用来保存设备中断
 * INVALIDATE_TLB_VECTOR_START至255作为特殊中断
 * 64位架构下每个CPU有独立的IDT表，而32位则共享一张表
+
 ```c
 /*0-31位中断或者异常*/
 
@@ -1019,6 +1026,18 @@ static const __initconst struct idt_data def_idts[] = {
 ```
 4. 中断部分开始于trap_init()，这里会填写IDT描述符构成中断向量表
 ```c
+
+
+asmlinkage void __init start_kernel(void)
+{
+    //陷阱门初始化
+    trap_init();//开中断模式执行
+    //中断门初始化
+    init_IRQ();//硬件中断（关中断模式）
+    //软中断初始化
+    softirq_init();
+}
+
 /*这几个初始化函数的关系没搞明白*/
 void __init trap_init(void)
 {
@@ -1139,13 +1158,41 @@ static void make_8259A_irq(unsigned int irq)
 下半部.一般中断 上半部 只会做一些最基础的操作（比如从网卡中复制数据到缓存中），
 然后对要执行的中断 下半部 进行标识，标识完调用 do_softirq() 函数进行处理。
 中断下半部也叫做可延迟操作.
+
+2. 中断上半部执行完后，在irq_exit()函数中会对中断下半部进行标识，唤醒softirq
+
+```c
+void irq_exit(void)
+{
+	__irq_exit_rcu();
+	rcu_irq_exit();
+	 /* must be last! */
+	lockdep_hardirq_exit();
+}
+static inline void __irq_exit_rcu(void)
+{
+#ifndef __ARCH_IRQ_EXIT_IRQS_DISABLED
+	local_irq_disable();
+#else
+	lockdep_assert_irqs_disabled();
+#endif
+	account_hardirq_exit(current);
+	preempt_count_sub(HARDIRQ_OFFSET);
+	if (!in_interrupt() && local_softirq_pending())
+		invoke_softirq();//唤醒中断下半部softirq 调用__do_softirq()函数进行软中断的处理
+
+	tick_irq_exit();
+}
+
+```
+
 2. softirq机制
 * 中断下半部 由 softirq（软中断） 机制来实现的
 * softirq_vec 数组是 softirq 机制的核心，softirq_vec 数组每个元素代表一种软中断
 * HI_SOFTIRQ 是高优先级tasklet，而 TASKLET_SOFTIRQ 是普通tasklet，tasklet是基于softirq机制的一种任务队列
 * NET_TX_SOFTIRQ 和 NET_RX_SOFTIRQ 特定用于网络子模块的软中断
 ```c
-//默认情况下，
+//默认情况下， 软中断描述符表，实际上就是一个全局的数组
 static struct softirq_action softirq_vec[NR_SOFTIRQS] __cacheline_aligned_in_smp;
 
 
@@ -1220,10 +1267,12 @@ asmlinkage __visible void do_softirq(void)
 ```
 ### tasklet机制
 1. tasklet机制是基于softirq机制的，tasklet机制其实就是一个任务队列，
-然后通过softirq执行。在Linux内核中有两种tasklet，一种是高优先级tasklet，一种是普通tasklet。这两种tasklet的实现基本一致，唯一不同的就是执行的优先级，高优先级tasklet会先于普通tasklet执行。
+然后通过softirq执行。每个CPU中有两种tasklet，一种是高优先级tasklet，一种是普通tasklet。这两种tasklet的实现基本一致，唯一不同的就是执行的优先级，高优先级tasklet会先于普通tasklet执行。
+
+2. softirq软中断类型内核中都是静态分配，不支持动态分配，而tasklet支持动态和静态分配，也就是驱动程序中能比较方便的进行扩展；
 
 ```c
-
+//把tasklet形成链表
 struct tasklet_head {
 	struct tasklet_struct *head;
 	struct tasklet_struct **tail;
@@ -1242,6 +1291,32 @@ struct tasklet_struct
 	};
 	unsigned long data;
 };
+
+
+
+static void __tasklet_schedule_common(struct tasklet_struct *t,
+				      struct tasklet_head __percpu *headp,
+				      unsigned int softirq_nr)
+{
+	struct tasklet_head *head;
+	unsigned long flags;
+
+	local_irq_save(flags);
+	head = this_cpu_ptr(headp);
+	t->next = NULL;
+	*head->tail = t;
+	head->tail = &(t->next);
+	raise_softirq_irqoff(softirq_nr);//tasklet是软中断，通过softirq来调用注册的终端处理函数
+	local_irq_restore(flags);
+}
+
+void __tasklet_schedule(struct tasklet_struct *t)
+{
+	__tasklet_schedule_common(t, &tasklet_vec,
+				  TASKLET_SOFTIRQ);
+}
+EXPORT_SYMBOL(__tasklet_schedule);
+
 
 ```
 2. tasklet本质是一个队列，通过结构体 tasklet_head 存储，并且每个CPU有一个这样的队列 
@@ -1358,7 +1433,7 @@ static inline void init_waitqueue_entry(struct wait_queue_entry *wq_entry, struc
 }
 
 
-//当创建等待队列之后，宏wait_event无线循环，直到条件满足，把进程状态置为TASK_RUNNING，然后从等待队列中移除
+//当创建等待队列之后，宏wait_event无限循环，直到条件满足，把进程状态置为TASK_RUNNING，然后从等待队列中移除
 #define wait_event(wq_head, condition)						\
 do {										\
 	might_sleep();								\

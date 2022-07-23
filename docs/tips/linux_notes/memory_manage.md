@@ -26,7 +26,9 @@
            |
 boost_watermark()//设置ZONE_BOOSTED_WATERMARK标志位
 回退到rmqueue()的时候，早点唤醒kswapd线程,便于及时满足分配大内存快的需求。
-![2022-06-30 10-05-10 的屏幕截图.png](http://tva1.sinaimg.cn/large/0070vHShly1h3q1nvi0knj30lr0kfgog.jpg)
+
+
+Huge pages 有 2MB 和 1GB 两种规格，2MB 大小（默认）适合用于 GB 级别的内存，而 1GB 大小适合用于 TB 级别的内存
 ```
 
 2. 内核使用pglist_data来管理内存节点，每个内存节点被分成多个zone，页面分配按照zone的水位来管理，
@@ -834,7 +836,7 @@ struct shrinker {
 
 #### 内存规整(内存规整基于页面迁移实现)
 
-1. 两个扫描者，一个由zone 从前向后扫描可迁移的页面，一个由zone从后向前空闲的页面，当
+1. 两个扫描者，一个由zone 从前向后扫描可迁移的页面，一个由zone从后向前扫描空闲的页面，当
 两者相遇或者已经满足分配大块内存并且已经满足最低水位要求退出扫描。
 
 2. 直接内存规整 __alloc_pages_direct_coompact()

@@ -24,3 +24,51 @@
  　#include "common.h"
 　 extern unsigned char key;
 ```
+
+6. 防止一个头文件被重复包含
+```c
+
+#ifndef COMDEF_H
+#define COMDEF_H
+
+//头文件内容 …
+#endif
+
+```
+
+7.  当定义了_DEBUG，输出数据信息和所在文件所在行
+```c
+
+#ifdef _DEBUG
+#define DEBUGMSG(msg,date) printf(msg);printf(“%d%d%d”,date,_LINE_,_FILE_)
+#else
+#define DEBUGMSG(msg,date)
+#endif
+```
+8. 用#把宏参数变为一个字符串,用##把两个宏参数贴合在一起
+
+```c
+＃include<cstdio>
+＃include<climits>
+using namespace std;
+
+#define STR(s)     #s
+#define CONS(a,b)  int(a##e##b)
+
+int main()
+
+{
+printf(STR(vck));               // 输出字符串vck
+printf(%dn, CONS(2,3));  // 2e3 输出:2000
+return 0;
+}
+
+```
+9. glibc和libc都是Linux下的C函数库，libc是Linux下的ANSI C的函数库；
+glibc是Linux下的GUN C的函数库；GNU C是一种ANSI C的扩展实现
+
+10. uClibc 是一个面向嵌入式Linux系统的小型的C标准库。最初uClibc是为了支持uClinux而开发，这是一个不需要内存管理单元（MMU）的Linux版本。
+uClibc比一般用于Linux发行版的C库GNU C Library (glibc)要小得多， uClibc专注于嵌入式Linux。很多功能可以根据空间需求进行取舍。
+
+11. Newlib是一个面向嵌入式系统的C运行库。最初是由Cygnus Solutions收集组装的一个源代码集合，取名为newlib，现在由Red Hat维护
+Newlib并不是唯一的选择，但是从成熟度来讲，newlib是最优秀的, 相比Minilibc更加健全

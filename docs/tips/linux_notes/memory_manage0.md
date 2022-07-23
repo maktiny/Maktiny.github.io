@@ -15,6 +15,7 @@ slab分配器在创建的不分配物理内存，只有在分配slab对象的时
 * slub机制：使用在大型系统中，性能比slab更好
 * slob机制：slob机制适合嵌入式系统
 
+5. slab分配器就是一页或者多个页(页里面包含空闲/使用的slab对象)， 分别插入到slab节点的三个链表中，slab节点又是slab描述符的元素。
 
 ```c
 //创建slab描述符
@@ -92,7 +93,7 @@ struct kmem_cache {
 	unsigned int useroffset;	/* Usercopy region offset */
 	unsigned int usersize;		/* Usercopy region size */
 
-	struct kmem_cache_node *node[MAX_NUMNODES];
+	struct kmem_cache_node *node[MAX_NUMNODES];//一个slab描述符(kmem_cache)有多个slab节点(kmem_cache_node)
 };
 
 
@@ -157,7 +158,7 @@ calculate_slab_order()函数用来计算slab分配器需要的页面数
 
 5. 分配slab对象
 ```c
-   slab分配器创建slab对象的时候使用伙伴系统的借口分配物理页
+   slab分配器创建slab对象的时候使用伙伴系统的接口分配物理页
    cache_alloc_refill()--->cache_grow_begin()--->kmem_getpages()--->__alloc_pages_node()分配物理页
 
    kmem_cache_alloc()
@@ -194,7 +195,8 @@ calculate_slab_order()函数用来计算slab分配器需要的页面数
 ```
 7. slab的管理区（管理空闲对象）
 * slab管理区是一个数组freelist, 根据slab分配器的空间大小，管理区有三种分配方式
-
+* slab的着色区其实就是一个偏移量， 不同的颜色代表了不同 的偏移量，尽量使得不同的对象的对应到不同的硬件高速缓存行上
+提高命中率
 ```c
 __kmem_cache_create()函数中的部分代码：
 /*
@@ -358,7 +360,7 @@ struct vmap_area {
 /*
 
 __vmalloc()的核心实现是__vmalloc_node_range()
-VMALLOC_START,可分配的起始地址：就是内核模块的结束地址 
+VMALLOC_START,可分配的起始地址：就是内核模块的起始地址 
 
 VMALLOC_END：可分配的结束地址：
 **/

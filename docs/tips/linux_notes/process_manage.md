@@ -2,12 +2,12 @@
 
 1. 0号(idle)进程是在init_task.c中静态初始化的，start_kernel()函数完成
 内核数据结构初始化之后，调用arch_call_rest_init()--->rest_init()---->调用内核kernel_init()
-,1号(init)进程创建，之后进程0回执行cpu_idle()（当就绪队里中没有可执行进程), 在SMP中，每个CPU都有
+,1号(init)进程创建，之后进程0会执行cpu_idle()（当就绪队里中没有可执行进程), 在SMP中，每个CPU都有
 一个0号进程。
 
 2. fork(),vfork(),clone()系统调用都是使用内核线程kernel_clone()实现的，
 fork()只复制父进程的页表项，实现写时复制。vfork()的父进程一直会阻塞，直到
-子进程退出为止，由于父进程回挂起，所以vfork()父子进程运行在相同的进程地址空间
+子进程退出为止，由于父进程会挂起，所以vfork()父子进程运行在相同的进程地址空间
 ，所以vfork()不用复制父进程的页表项。clone()可以通过flag控制从父进程继承的资源。
 
 3. 内核进程与内核线程都是用task_struct数据结构描述，内核线程没有独立的进程地址空间，
@@ -17,7 +17,7 @@ task_struct的mm指向为NULL
 kthread_run()创建的内核线程马上就可以运行。
 
 5. 进程终止途径：
-* 从main函数退出，链接程序回自动添加exit()
+* 从main函数退出，链接程序会自动添加exit()
 * 自动调用exit()
 * 收到一个SIGKILL终止信号，或者不能处理的信号
 * 进程在内核态执行产生异常。
@@ -44,7 +44,7 @@ clone() ,fork(), vfork()的系统调用都是
         |                                   |--------update_curr()更新父进程的vruntime
         |                                   |-------palce_entity()对进程的虚拟时间进行惩罚
         |                                             |---vruntime = sched_vslice(cfs_rq, se)//计算虚拟时间
-        |                                  ###子进程的vruntime选取两者中的最打值 se->vruntime = max_vruntime(se->vruntime, vruntime);
+        |                                  ###子进程的vruntime选取两者中的最大值 se->vruntime = max_vruntime(se->vruntime, vruntime);
         |
         |---------copy_mm()  #把父进程的地址空间复制给子进程 
         |             |

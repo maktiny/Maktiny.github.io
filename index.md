@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Maktiny
-description: 日升月落 ， 又一个夏秋.
+description: Please keep Initiative, 80 percent of success is just showing up.
 show_downloads: false
 google_analytics: true
 theme: jekyll-theme-cayman
