@@ -9,6 +9,7 @@ author: Maktiny
 ---
 
 
+
 ## Navigation
 
 [GitHub](https://github.com/Maktiny)
@@ -29,10 +30,6 @@ author: Maktiny
 ## HQEMU
 *  [HQEMU的框架](./docs/tips/linux_notes/HQEMU_structure.md)
 *  [HQEMU的hot path的执行流](./docs/tips/linux_notes/hqemu_exec_flow.md)
-
-## LATX
-*  [LATX的后端框架](./docs/tips/linux_notes/QEMU_exec_flow.md)
-*  [LATX间接分支的处理](./docs/tips/linux_notes/LATX  handle_indirect.md)
 
 ## paper
 *  [动态二进制热点代码相关的paper](./docs/tips/linux_notes/paper_list.md)

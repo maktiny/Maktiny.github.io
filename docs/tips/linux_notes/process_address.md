@@ -256,6 +256,13 @@ vm_mmap_pgoff()
      |
      |
      |-------mmap_region()
+首先调用find_vma_links()查找是否已有vma线性区包含addr，如果有调用do_munmap()把这个vma干掉。
+
+Linux不希望vma和vma之间存在空洞，只要新创建vma的flags属性和前面或者后面vma存在重叠，就尝试合并成一个新的vma，减少slab缓存消耗量，同时也减少了空洞浪费。
+
+如果无法合并，那么只好新创建vma并对vma结构体初始化先关成员；根据vma是否有页锁定标志(VM_LOCKED)，决定是否立即分配物理页。
+
+最后将新建的vma插入进程空间vma红黑树中，并返回addr
 ```
 10. 删除映射
 ```c
