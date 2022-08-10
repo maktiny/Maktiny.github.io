@@ -26,9 +26,8 @@
            |
 boost_watermark()//设置ZONE_BOOSTED_WATERMARK标志位
 回退到rmqueue()的时候，早点唤醒kswapd线程,便于及时满足分配大内存快的需求。
-
-
 Huge pages 有 2MB 和 1GB 两种规格，2MB 大小（默认）适合用于 GB 级别的内存，而 1GB 大小适合用于 TB 级别的内存
+
 ```
 
 2. 内核使用pglist_data来管理内存节点，每个内存节点被分成多个zone，页面分配按照zone的水位来管理，
