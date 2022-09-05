@@ -65,5 +65,21 @@ NET算法只知道头结点，后续的热点块需要另外确定
 2. 他是基于IR实现的，在中间层可以容易的实现对路径编码，如果只有后端，怎实现路径编码，每一个TB都切换到qemu去进行编码？开销太大
 
 
-### Improving the Performance of Trace-based Systems by False Loop Filtering 2011
+#### Improving the Performance of Trace-based Systems by False Loop Filtering 2011
 1. cyclic-path-based repetition detector,改进该算法，使其能够筛选出false loop，改善JIT的编译效率
+
+#### 二进制翻译中基于数据流和控制流分析的代码优化方法-----中科院博士论文
+1. 静态数据流分析方法
+* 抽象出数据流图DFG-IR 
+* 根据DFG进行活性分析，冗余访存消除，无效分支消除，热点数据(比如env)等数据分配特定的寄存器存储(类似寄存器直接映射)
+
+2. 动态控制流的superblock的优化
+* 根据插桩获取的profing信息，提取热点代码块hot TB, 生成superblock
+* 基于延迟槽对函数调用和返回指令的翻译进行优化
+* 使用多线程重新翻译hot TB，根据CFS控制流图对hot TB进行重排，改善热点代码的空间局部性，减少cache missing rate
+* 基于控制流对冗余代码进行消除
+* 生成superblock的时候必须保每个TB的exit_tb,应为SMC自修改代码无效TB或者unlink的时候需要退出到host态(此时code cache中只有优化后的superblock,原来的TB无效掉了)
+
+#### alto: a link-time optimizer for the Compaq Alpha
+1. 连接时的优化器：连接时可以知道变量的地址，最后的代码布局等信息，可以知道的信息比链接之前更多，优化的机会更多
+* 常量传播，存活性分析，不可达代码消除，常量值计算，消除不必须的访存，函数内联，优化代码布局，指令调度
