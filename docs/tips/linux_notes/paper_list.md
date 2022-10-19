@@ -83,3 +83,22 @@ NET算法只知道头结点，后续的热点块需要另外确定
 #### alto: a link-time optimizer for the Compaq Alpha
 1. 连接时的优化器：连接时可以知道变量的地址，最后的代码布局等信息，可以知道的信息比链接之前更多，优化的机会更多
 * 常量传播，存活性分析，不可达代码消除，常量值计算，消除不必须的访存，函数内联，优化代码布局，指令调度
+
+
+#### BOLT: A Practical Binary Optimizer for Data Centers and Beyond ---后连接优化器
+1. 针对数据中心这样大规模程序的优化(基本块 和 函数的重排) --基于LLVM的优化，优化pass,代码开源，提交llvm中:https://github.com/llvm/llvm-project/blob/main/bolt/docs/OptimizingClang.md
+2. 静态优化器offline,
+3. 利用perf的ptrace绑定目标进程，然后对(Intel)LBR最近分支记录(Last branch record)采样，获取profile信息，
+
+
+#### OCOLOS: Online COde Layout OptimizationS----把bolt改成online的优化器
+1. 为了提高L1 cache和iTLB的命中率，充分利用程序的局部性，提出了basic block基本块和function函数的重排,
+2. hot-cold基本块和函数中的hot-cold基本块都是分开存储的
+3. 利用perf的ptrace绑定目标进程，然后对(Intel)LBR最近分支记录(Last branch record)采样，获取profile信息，
+4. 根据采样信息区分hot和cold基本块，然后利用ptrace对function调用进行拦截，获取function的信息
+5. 利用LLVM的pass对hot基本块进行优化，然后重排， 
+6. function中的hot基本块也进行重排， 函数重排：被调函数紧挨着调用函数之后(递归重排)，难点由于函数地址改变，需要修改函数的返回地址以及函数调用栈
+7. 采样开销大，但是对于数据中心，大型数据库系统(MySQL性能提升1.4倍)这样的应用场景性能提升明细
+
+
+

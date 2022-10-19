@@ -1,4 +1,67 @@
+#### peephole optimization
+
+##### pattern 1 : push/pop的消除
+* 直接对st.d和addi.d的模式进行识别，有几个st.d和addi.d的模式对进行计数n，
+
+```
+ir2:
+push		r15
+push		r14
+push		r13
+push		r12
+
+ir1:
+[12, 4] -------   5175814
+st.d      $t7,$s4,-8
+addi.d    $s4,$s4,-8
+[15, 5] -------   5175816
+st.d      $t6,$s4,-8
+addi.d    $s4,$s4,-8
+
+## 一次遍历得到n，然后offset = n * 4;
+在最后一个push的时候才进行更新栈指针esp(s4)，addi.d    $s4,$s4,-offset
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+# 优化方案
+1. 现在的热路径识别代码只识别出热路径的头部， 整个trace的构建还需要使用构建CFG控制流图,控制流图CFG构建多大这是个问题？(约定一个深度)
+hpath->trace中保存的是热路径的头TB, 根据每一个头TB构建CFG，然后在重新翻译的时候进行优化。自己使用struct node构建CFG
+```
+typedef struct node {
+
+TranslationBlock* current_tb;
+
+IR1_INST *ir1_inst_array;
+int ir1_number;
+
+IR2_INST *ir2_inst_array;
+int ir2_number;
+
+int real_ir2_inst_num
+
+uintptr_t jmp_dest[2];
+
+};
+```
+2. 函数内联
+* 在重新翻译的时候，如果是call->return， 可以向后扫描一个TB，该TB的IR1是知道的，如果调用的函数是叶子函数，则把call和return 消除掉(用bitmap标记指令，标记的就消除掉)
+* 可以做，但是有多少性能提升(主要是叶子节点函数太少)
+
+3. 
+
 ### 窥孔优化
+1. cmp-jcc / test-jcc
 
 
 #### 现在实施方案的改进
