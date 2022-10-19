@@ -2,6 +2,12 @@
 ```c
 ./myrun1.sh test all 1
 
+
+在myrun2.sh中有
+#ulimit -s unlimited   //对该程序的使用的堆栈资源没有限制
+ulimit -c unlimited   //可以运行的最大并发进程数没有限制
+
+
 ```
 
 ## 运行单个样例

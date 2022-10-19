@@ -1,0 +1,863 @@
+From 382edecbbb71215e940a1651cb9eb016a0803bcb Mon Sep 17 00:00:00 2001
+From: lixu <2996654722@qq.com.cn>
+Date: Mon, 26 Sep 2022 16:30:52 +0800
+Subject: [PATCH] LATX:opt: supperblock optimize
+
+using instructument technology to extract hot tb and
+re-translate it to generate  better LoongArch code
+
+Change-Id: I0844d65082aad19add1bd0d3dc03ab81cda3fca5
+Signed-off-by: lixu <lixu@loongson.cn>
+---
+ .../include@exec@exec-all.h                   |   2 +-
+ accel/tcg/cpu-exec.c                          |  28 +-
+ accel/tcg/tcg-runtime.c                       |  68 +++--
+ accel/tcg/translate-all.c                     |   4 +-
+ hw/core/cpu.c                                 |   2 +-
+ include/exec/exec-all.h                       |   7 +-
+ include/hw/core/cpu.h                         |   3 +-
+ linux-user/exit.c                             |   8 +-
+ target/i386/latx/include/common.h             |  24 +-
+ target/i386/latx/include/superblock.h         |  41 ++-
+ target/i386/latx/latx-config.c                |   2 +
+ target/i386/latx/optimization/superblock.c    | 272 +++++++++++-------
+ target/i386/latx/optimization/tunnel-lib.c    |   2 +-
+ target/i386/latx/translator/translate.c       |  19 --
+ target/i386/mips/include/lsenv.h              |  16 ++
+ 15 files changed, 296 insertions(+), 202 deletions(-)
+
+diff --git a/.ccls-cache/@home@liyi@programs@lat/include@exec@exec-all.h b/.ccls-cache/@home@liyi@programs@lat/include@exec@exec-all.h
+index 7f1d6f19e3..6f7e2b2211 100644
+--- a/.ccls-cache/@home@liyi@programs@lat/include@exec@exec-all.h
++++ b/.ccls-cache/@home@liyi@programs@lat/include@exec@exec-all.h
+@@ -527,7 +527,7 @@ struct TranslationBlock {
+     /* superblock optimization */
+ #ifdef CONFIG_LATX_SUPERBLOCK
+    /* hot path profile messages */
+-   uint8_t enable_hot_profile;/* start profile or not*/
++   //uint8_t enable_hot_profile;/* start profile or not*/
+    unsigned long indirect_branch_addr;
+ #endif
+ 
+diff --git a/accel/tcg/cpu-exec.c b/accel/tcg/cpu-exec.c
+index 19078e5263..ee2febb262 100644
+--- a/accel/tcg/cpu-exec.c
++++ b/accel/tcg/cpu-exec.c
+@@ -44,6 +44,10 @@
+ #include "internal.h"
+ #include "qemu/cacheflush.h"
+ 
++#ifdef CONFIG_LATX_SUPERBLOCK
++#include "superblock.h"
++#endif
++
+ /* -icount align implementation. */
+ 
+ typedef struct SyncClocks {
+@@ -580,6 +584,20 @@ TranslationBlock* latx_tb_find(void *cpu_state, ADDRX x86_pc)
+ }
+ #endif
+ 
++/**
++ * trace head's criterions are:
++ * 1. the target is a backward block or a tb in cycle path
++ * **/
++static inline int isPathHead(TranslationBlock* last_tb, TranslationBlock* next_tb) {
++
++    if(next_tb && last_tb && (next_tb->pc <= last_tb->pc)) {
++        return 1;
++    }
++    else{
++        return 0;
++    }
++}
++
+ static inline TranslationBlock *tb_find(CPUState *cpu,
+                                         TranslationBlock *last_tb,
+                                         int tb_exit, uint32_t cflags)
+@@ -593,12 +611,14 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
+ 
+     tb = tb_lookup(cpu, pc, cs_base, flags, cflags);
+ 
+-    /* superblock optimization */
++    /* superblock optimization: enter guest executing mode, the trace of collecting is starting. */
+ #ifdef CONFIG_LATX_SUPERBLOCK
+-    if(option_superblock && tb ){
++
++    if(option_superblock && tb && tb->counter == THRESHOLD_VALUE){
+        qatomic_set(&tb->enable_hot_profile, 1);
+     }
+ #endif
++
+     if (tb == NULL) {
+ #ifdef CONFIG_LATX_AOT
+         if (option_load_aot && option_debug_aot) {
+@@ -1023,6 +1043,10 @@ int cpu_exec(CPUState *cpu)
+             }
+ 
+             tb = tb_find(cpu, last_tb, tb_exit, cflags);
++
++
++
++
+ #ifdef CONFIG_LATX_DEBUG
+             trace_tb_execution(tb);
+ #endif
+diff --git a/accel/tcg/tcg-runtime.c b/accel/tcg/tcg-runtime.c
+index c101221bd8..2fdab298aa 100644
+--- a/accel/tcg/tcg-runtime.c
++++ b/accel/tcg/tcg-runtime.c
+@@ -190,32 +190,29 @@ extern pthread_cond_t condition;
+ extern QSIMPLEQ_HEAD(Queue, hotpath_node) paths ;
+ 
+ /* superblock optimization */
+-
+ void HELPER(handle_superblock)(CPUArchState *env, void *ptr)
+ {
+-#ifdef CONFIG_LATX_SUPERBLOCK
+-
+     /*there is tb pointer passed by helper function  */
+-    TranslationBlock *current_tb = (TranslationBlock *) ptr;
+-    //fprintf(stderr,"%p\n", current_tb->pc);
++    TranslationBlock *current_tb = (TranslationBlock *)ptr;
++
+     qatomic_set(&current_tb->enable_hot_profile, 0);
+     qatomic_set(&current_tb->cflags, current_tb->cflags | CF_RETRANSLATE);
+-    /*if tb_list is full, optimize this trace*/
+-    if(env->tb_count == MAX_SIZE_OF_TRACE) {
+-
+-        hotpath_node* path = (hotpath_node*)malloc(sizeof(hotpath_node));
+-        //memset(path, 0, sizeof(path));
++    bool flag = false;
++    /*if tb_list is full or there is a backward trace, optimize this trace*/
++    if (env->tb_count == MAX_SIZE_OF_TRACE)
++    {
++        hotpath_node *path = (hotpath_node *)malloc(sizeof(hotpath_node));
+ 
+         int j = 0;
+-        for(; j < env->tb_count; ++j) {
++        for (; j < env->tb_count; ++j)
++        {
+             path->trace[j] = env->tb_list[j];
+-            //fprintf(stderr,"0x%lx\n", path->trace[j]->pc);
+         }
+         path->trace_size = env->tb_count;
+ 
+         optimize_queue_lock();
+ 
+-        QSIMPLEQ_INSERT_TAIL(&paths,path, entry);
++        QSIMPLEQ_INSERT_TAIL(&paths, path, entry);
+ 
+         optimize_queue_unlock();
+ 
+@@ -225,33 +222,33 @@ void HELPER(handle_superblock)(CPUArchState *env, void *ptr)
+         memset(env->tb_list, 0, sizeof(env->tb_list));
+         env->tb_count = 0;
+ 
+-         goto out;
++        flag = true;
+     }
+-    else {
+-        /*whether the trace is loop or not*/
+-        TranslationBlock* tb ;
+-        for (int i = 0; i < env->tb_count; ++i) {
++    else
++    {
++        /*whether the trace is loop or not: "O" shape or "6" shape*/
++        TranslationBlock *tb;
++        for (int i = 0; i < env->tb_count; ++i)
++        {
+             tb = env->tb_list[i];
+-            if(likely(tb &&
+-               current_tb->pc == tb->pc &&
+-               current_tb->cs_base == tb->cs_base &&
+-               current_tb->flags == tb->flags &&
+-               tb_cflags(current_tb) == tb->cflags)){
+-                hotpath_node* path = (hotpath_node*)malloc(sizeof(hotpath_node));
+-                //memset(path, 0, sizeof(path));
++            if (likely(tb &&
++                       current_tb->pc == tb->pc &&
++                       current_tb->cs_base == tb->cs_base &&
++                       current_tb->flags == tb->flags &&
++                       tb_cflags(current_tb) == tb->cflags))
++            {
++                hotpath_node *path = (hotpath_node *)malloc(sizeof(hotpath_node));
+ 
+                 int j = 0;
+-                for(; j < env->tb_count; ++j) {
++                for (; j < env->tb_count; ++j)
++                {
+                     path->trace[j] = env->tb_list[j];
+-                    //fprintf(stderr,"0x%lx\n", path->trace[j]->pc);
+                 }
+                 path->trace_size = env->tb_count;
+ 
+-                //printf("path's length is: %d \n", path->trace_size);
+-
+                 optimize_queue_lock();
+ 
+-                QSIMPLEQ_INSERT_TAIL(&paths,path, entry);
++                QSIMPLEQ_INSERT_TAIL(&paths, path, entry);
+ 
+                 optimize_queue_unlock();
+ 
+@@ -260,15 +257,14 @@ void HELPER(handle_superblock)(CPUArchState *env, void *ptr)
+                 memset(env->tb_list, 0, sizeof(env->tb_list));
+                 env->tb_count = 0;
+ 
+-                goto out;
++               flag = true;
+             }
+         }
+     }
+ 
+-   env->tb_list[env->tb_count] = current_tb;
+-   env->tb_count++;
++    if (!flag) {
++        env->tb_list[env->tb_count] = current_tb;
++        env->tb_count++;
++    }
+ 
+-out:
+-    return ;
+-#endif
+ }
+diff --git a/accel/tcg/translate-all.c b/accel/tcg/translate-all.c
+index 483eaf0d60..eaf2dbc251 100644
+--- a/accel/tcg/translate-all.c
++++ b/accel/tcg/translate-all.c
+@@ -1763,6 +1763,7 @@ void tb_phys_invalidate(TranslationBlock *tb, tb_page_addr_t page_addr)
+  *
+  * Called with mmap_lock held in user-mode
+  * **/
++#if 0
+ void tb_phys_invalidate_current(TranslationBlock *tb, CPUState* cpu)
+ {
+     int flags = 0;
+@@ -1792,6 +1793,7 @@ void tb_phys_invalidate_current(TranslationBlock *tb, CPUState* cpu)
+     // }
+     // tb_phys_invalidate__locked(tb);
+ }
++#endif
+ 
+ #ifdef CONFIG_SOFTMMU
+ /* call with @p->lock held */
+@@ -2042,7 +2044,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
+     tb->enable_hot_profile = 0;
+     tb->counter = THRESHOLD_VALUE;
+     tb->new_tb_offset = 1;
+-    tb->indirect_branch_addr = NULL;
++    tb->tbnode = NULL;
+ #endif
+ 
+     tb->exec_times = 0;
+diff --git a/hw/core/cpu.c b/hw/core/cpu.c
+index 99d073f01a..e719560aa8 100644
+--- a/hw/core/cpu.c
++++ b/hw/core/cpu.c
+@@ -354,7 +354,7 @@ static void cpu_common_initfn(Object *obj)
+     /* the default value is changed by qemu_init_vcpu() for softmmu */
+     cpu->nr_cores = 1;
+     cpu->nr_threads = 1;
+-    cpu->count = 1;
++
+ 
+     qemu_mutex_init(&cpu->work_mutex);
+     QSIMPLEQ_INIT(&cpu->work_list);
+diff --git a/include/exec/exec-all.h b/include/exec/exec-all.h
+index 14e83745a0..0fded9e3b4 100644
+--- a/include/exec/exec-all.h
++++ b/include/exec/exec-all.h
+@@ -22,6 +22,7 @@
+ 
+ #include "cpu.h"
+ #include "optimize-config.h"
++#include "stdbool.h"
+ #include "exec/tb-context.h"
+ #ifdef CONFIG_TCG
+ #include "exec/cpu_ldst.h"
+@@ -530,9 +531,9 @@ struct TranslationBlock {
+ #ifdef CONFIG_LATX_SUPERBLOCK
+    /* hot path profile messages */
+    int64_t enable_hot_profile;/* start profile or not*/
+-   int64_t counter;
+-   int new_tb_offset;
+-   void* indirect_branch_addr; /*this is next_tb's ptr*/
++   int64_t counter;/*tb exec times*/
++   int new_tb_offset;/*the offset of new tb about old tb*/
++   void* tbnode ;/*the TBNode ptr*/
+ #endif
+ 
+ #ifdef CONFIG_LATX_PROFILER
+diff --git a/include/hw/core/cpu.h b/include/hw/core/cpu.h
+index 2784a3578f..01cee04b22 100644
+--- a/include/hw/core/cpu.h
++++ b/include/hw/core/cpu.h
+@@ -337,8 +337,7 @@ struct CPUState {
+ 
+     int nr_cores;
+     int nr_threads;
+-///////
+-    int count;
++
+ 
+     struct QemuThread *thread;
+ #ifdef _WIN32
+diff --git a/linux-user/exit.c b/linux-user/exit.c
+index 12f7fba6cd..0063887bc0 100644
+--- a/linux-user/exit.c
++++ b/linux-user/exit.c
+@@ -32,9 +32,7 @@ extern void __gcov_dump(void);
+ 
+ #endif
+ 
+-// #ifdef CONFIG_LATX_SUPERBLOCK
+-// #include "superblock.h"
+-// #endif
++
+ void preexit_cleanup(CPUArchState *env, int code)
+ {
+ #ifdef CONFIG_GPROF
+@@ -46,9 +44,7 @@ void preexit_cleanup(CPUArchState *env, int code)
+ #ifdef CONFIG_LATX_PROFILER
+         dump_exec_info();
+ #endif
+-// #ifdef CONFIG_LATX_SUPERBLOCK
+-//         StopThread();
+-// #endif
++
+ 
+         gdb_exit(code);
+         qemu_plugin_atexit_cb();
+diff --git a/target/i386/latx/include/common.h b/target/i386/latx/include/common.h
+index 3de798a8d6..19fd5006df 100644
+--- a/target/i386/latx/include/common.h
++++ b/target/i386/latx/include/common.h
+@@ -36,21 +36,21 @@
+ #define offsetof(st, m) __builtin_offsetof(st, m)
+ #endif
+ 
+-#ifndef _Bool
+-#define _Bool char
+-#endif
++// #ifndef _Bool
++// #define _Bool char
++// #endif
+ 
+-#ifndef bool
+-#define bool _Bool
+-#endif
++// #ifndef bool
++// #define bool _Bool
++// #endif
+ 
+-#ifndef true
+-#define true 1
+-#endif
++// #ifndef true
++// #define true 1
++// #endif
+ 
+-#ifndef false
+-#define false 0
+-#endif
++// #ifndef false
++// #define false 0
++// #endif
+ 
+ enum {
+     UNKNOWN_EXTENSION = 96,
+diff --git a/target/i386/latx/include/superblock.h b/target/i386/latx/include/superblock.h
+index e8b54cfae2..7b9b3e5d12 100644
+--- a/target/i386/latx/include/superblock.h
++++ b/target/i386/latx/include/superblock.h
+@@ -1,19 +1,17 @@
+-#ifndef _SUPERBLOCK_H_
+-#define _SUPERBLOCK_H_
+-
++#ifndef SUPERBLOCK_H
++#define SUPERBLOCK_H
+ 
+ 
++#include "ir1.h"
++#include "ir2.h"
++#include "qemu/osdep.h"
+ #include "qemu/queue.h"
++#include "common.h"
+ #include <pthread.h>
+-#include "qemu/osdep.h"
++#include "latx-config.h"
+ #include "include/tcg/tcg.h"
+-#include "exec/exec-all.h"
+ #include "accel/tcg/internal.h"
+-#include "include/exec/tb-lookup.h"
+-#include "include/exec/translate-all.h"
+-#include "include/exec/tb-hash.h"
+-#include "include/tcg/tcg.h"
+-#include "target/i386/latx/include/latx-config.h"
++#include <glib.h>
+ 
+ 
+ #define  HOTPATH_LENGTH 50
+@@ -27,6 +25,20 @@ typedef struct hotpath_node{
+     QSIMPLEQ_ENTRY(hotpath_node) entry;
+ } hotpath_node;
+ 
++typedef struct TBNode {
++    TranslationBlock* current_tb;
++
++    IR1_INST *ir1_inst_array;
++    int ir1_inst_number;
++
++    IR2_INST *ir2_inst_array;
++    int ir2_inst_number;
++    int real_ir2_inst_num;
++
++    uintptr_t* jmp_dest0;
++    uintptr_t* jmp_dest1;
++} TBNode;
++
+ /*the optimize queue and mutex init */
+ int optimize_queue_lock(void);
+ int optimize_queue_unlock(void);
+@@ -41,6 +53,15 @@ void StopThread(void);
+ 
+ void *WorkerFunc(void * argv);
+ 
++int is_same(TranslationBlock* tb, TranslationBlock* next_tb);
++
++/*construct and destory the cfg */
++//TBNode* construct_CFG(TranslationBlock* tb, target_ulong* set);
++
++TBNode* construct_CFG(TranslationBlock* tb, target_ulong* set, CPUState *cpu,  GHashTable* g_hash);
++void destroy_CFG(TBNode* root);
++TranslationBlock *tbnode_gen_code(TBNode* tbnode, CPUState *cpu);
++
+ 
+ 
+ 
+diff --git a/target/i386/latx/latx-config.c b/target/i386/latx/latx-config.c
+index 561688c65a..deee93507d 100644
+--- a/target/i386/latx/latx-config.c
++++ b/target/i386/latx/latx-config.c
+@@ -410,6 +410,8 @@ void latx_lsenv_init(CPUArchState *env)
+     env->tb_exec_count = 0;
+     env->last_store_insn = 0;
+     lsenv->current_ir1 = 0;
++
++
+     latx_guest_stack_init(env);
+ #endif
+ /* superblock optimization */
+diff --git a/target/i386/latx/optimization/superblock.c b/target/i386/latx/optimization/superblock.c
+index 4176dd99b1..3d83180315 100644
+--- a/target/i386/latx/optimization/superblock.c
++++ b/target/i386/latx/optimization/superblock.c
+@@ -3,170 +3,226 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ 
+-#ifdef CONFIG_LATX_SUPERBLOCK
++//#ifdef CONFIG_LATX_SUPERBLOCK
+ 
+ /*multi thread access the queue, so add the lock */
+ pthread_mutex_t lock;
+ pthread_cond_t condition;
+ 
++#define MAX_TREE_NUM 150 /*the max number of tree node */
++
+ static u_int8_t threadexit = 0;
+ 
+ #define MAX_THREAD_NR 1 /*the number of threads */
+ pthread_t threadid[MAX_THREAD_NR];
+ 
+ /*the optimize queue*/
+-QSIMPLEQ_HEAD(Queue, hotpath_node) paths ;
+-
++QSIMPLEQ_HEAD(Queue, hotpath_node) paths;
+ 
+-/**************************  mutex  *****************/
+ /*init the lock, this function is runned before main()*/
+- void  optimize_queue_lock_init(void){
+-    pthread_mutex_init(&lock, NULL);
+-}
++void optimize_queue_lock_init(void) { pthread_mutex_init(&lock, NULL); }
+ 
+- int optimize_queue_lock(void) {
+-    return pthread_mutex_lock(&lock);
+-}
++int optimize_queue_lock(void) { return pthread_mutex_lock(&lock); }
+ 
+- int optimize_queue_unlock(void) {
+-    return pthread_mutex_unlock(&lock);
+-}
++int optimize_queue_unlock(void) { return pthread_mutex_unlock(&lock); }
+ 
+-/**************************  queue  *****************/
+-/*initialize the optimize queue when lsenv is initizlizeds*/
+- void optimize_queue_init(void) {
+-    QSIMPLEQ_INIT(&paths);
+-}
+ 
++/*initialize the optimize queue when lsenv is initizlizeds*/
++void optimize_queue_init(void) { QSIMPLEQ_INIT(&paths); }
+ 
+-void StartThread(CPUState* cpu) {
++void StartThread(CPUState* cpu)
++{
+     optimize_queue_lock_init();
+     optimize_queue_init();
+     pthread_cond_init(&condition, NULL);
+     threadexit = 0;
+-    for(int i = 0; i < MAX_THREAD_NR; ++i) {
++    for (int i = 0; i < MAX_THREAD_NR; ++i) {
+         /*FIXME: here the point "(void *)paths" maybe wrong*/
+-        //printf("start worker thread:%ld.\n",threadid[i]);
+-        int ret = pthread_create(&threadid[i], NULL, WorkerFunc,(void *)cpu);
+-        //printf("thread[%ld] statrts to run.\n",&lsenv->threadid[i] );
++        // printf("start worker thread:%ld.\n",threadid[i]);
++        int ret = pthread_create(&threadid[i], NULL, WorkerFunc, (void*)cpu);
++        // printf("thread[%ld] statrts to run.\n",&lsenv->threadid[i] );
+         if (ret != 0)
+-            printf("failed to create worker thread.\n");
++            qemu_log("failed to create worker thread.\n");
+     }
+-
+ }
+ 
+ void StopThread(void)
+ {
+-     pthread_cond_destroy(&condition);
+-     pthread_mutex_destroy(&lock);
+-     int ret;
+-     threadexit = 1;
+-     for(int i = 0; i < MAX_THREAD_NR; ++i) {
+-       // printf("thread[%ld] will be end.\n",&lsenv->threadid[i] );
++    pthread_cond_destroy(&condition);
++    pthread_mutex_destroy(&lock);
++    int ret;
++    threadexit = 1;
++    for (int i = 0; i < MAX_THREAD_NR; ++i) {
++        // printf("thread[%ld] will be end.\n",&lsenv->threadid[i] );
+         ret = pthread_join(threadid[i], NULL);
+         if (!ret) {
+-                printf("Thread %d joined\n", i);
+-          } else  {
+-              printf("Thread %d join failed\n", i);
+-          }
+-        //printf("stop worker thread:%ld.\n",threadid[i]);
++            qemu_log("Thread %d joined\n", i);
++        } else {
++            qemu_log("Thread %d join failed\n", i);
++        }
++    }
++    qemu_log("stop worker thread:.\n");
++}
++
++void traverse(void)
++{
++    hotpath_node* item;
++    QSIMPLEQ_FOREACH(item, &paths, entry)
++    {
++        qemu_log("data: %d  \n", item->trace_size);
+     }
+ }
+ 
+-void traverse(void) {
+-     hotpath_node *item;
+-     QSIMPLEQ_FOREACH(item, &paths, entry) {
+-                     printf("data: %d  \n", item->trace_size);
+-     }
++int is_same(TranslationBlock* tb, TranslationBlock* next_tb)
++{
++    if (likely(tb && next_tb && tb->pc == next_tb->pc &&
++               tb->cs_base == next_tb->cs_base && tb->flags == next_tb->flags &&
++               tb_cflags(tb) == tb_cflags(next_tb))) {
++        return 1;
++    } else {
++        return 0;
++    }
+ }
+ 
+-/************************** thread function  *****************/
++TranslationBlock* tbnode_gen_code(TBNode* tbnode, CPUState* cpu)
++{
++    target_ulong cs_base, pc;
++    uint32_t flags;
++    uint32_t cflags;
++    TranslationBlock* new_tb = NULL;
++    TranslationBlock* old_tb = tbnode->current_tb;
++
++    pc = old_tb->pc;
++    flags = old_tb->flags;
++    /*maybe cflags is CF_INVALID in other opsition, so save it*/
++    cflags = (old_tb->cflags & ~CF_INVALID) | 1;
++    cs_base = old_tb->cs_base;
++    cflags |= CF_RETRANSLATE;
++
++    mmap_lock();
++
++    new_tb = tb_gen_code(cpu, pc, cs_base, flags, cflags);
++    /*old_tb jump to new_tb*/
++    if (new_tb) {
++        qatomic_set(&old_tb->new_tb_offset,
++                    (new_tb->tc.ptr - old_tb->tc.ptr) >> 2);
++    }
++    mmap_unlock();
+ 
+-void *WorkerFunc(void * argv) {
++    return new_tb;
++}
++
++static int node_count = 0;  // the limit of tree node number;
++
++TBNode* construct_CFG(TranslationBlock* tb, target_ulong* set, CPUState* cpu,
++                      GHashTable* g_hash)
++{
++    if (tb == NULL) {
++        return NULL;
++    }
+ 
+-     CPUState* cpu =  (CPUState*) argv;
+-     CPUArchState* env = (CPUArchState*) cpu->env_ptr;
+-     TranslationBlock* tb, *new_tb;
+-     target_ulong cs_base, pc;
+-     uint32_t flags;
+-     uint32_t cflags;
++    if ((tb->cflags & CF_INVALID)) {
++        return NULL;
++    }
+ 
+-     /*initinalize the _thread paramaters when create threads: lsenv,tcg_ctx */
+-     tcg_register_thread();
+-     latx_lsenv_init(env);
++    if (node_count == MAX_TREE_NUM)
++        return NULL;
+ 
+-     for (;;) {
++    /*the hash able is beter to elimiate the same tb in a cfg*/
++    if (g_hash_table_contains(g_hash, (void*)tb->pc)) {
++        return NULL;
++    } else {
++        g_hash_table_add(g_hash, (void*)tb->pc);
++    }
++
++    // consturct tree with recursion
++    TBNode* node = (TBNode*)malloc(sizeof(TBNode));
++    node->current_tb = tb;
++    tb->tbnode = (void*)node;
++    /*
++        TODO: Maybe we can reorder tb in here if we need to do that.
++    */
++    TranslationBlock* new_tb = tbnode_gen_code(node, cpu);
++    node->current_tb = new_tb;
++
++    ++node_count;
++
++    node->jmp_dest1 = (uintptr_t*)construct_CFG(
++        (TranslationBlock*)tb->jmp_dest[1], set, cpu, g_hash);
++    node->jmp_dest0 = (uintptr_t*)construct_CFG(
++        (TranslationBlock*)tb->jmp_dest[0], set, cpu, g_hash);
++
++    return node;
++}
++
++void destroy_CFG(TBNode* root)
++{
++    if (root == NULL)
++        return;
++
++    TBNode* jmp0 = (TBNode*)root->jmp_dest0;
++    TBNode* jmp1 = (TBNode*)root->jmp_dest1;
++    /* FIXME: after, we will free the sapce at  struct TBNode of
++     *  the IR2_INST *ir2_inst_array  and IR1_INST *ir_inst_array in here
++     */
++    free(root);
++    destroy_CFG(jmp0);
++    destroy_CFG(jmp1);
++}
++
++/************************** thread function  *****************/
++void* WorkerFunc(void* argv)
++{
++    CPUState* cpu = (CPUState*)argv;
++    CPUArchState* env = (CPUArchState*)cpu->env_ptr;
++    TranslationBlock* tb;
++
++    /*initinalize the _thread paramaters when create threads: lsenv,tcg_ctx */
++    tcg_register_thread();
++    latx_lsenv_init(env);
++
++    for (;;) {
+         /*kill the thread and exit*/
+-        if(threadexit == 1) {
++        if (threadexit == 1) {
+             break;
+         }
+-
+-        optimize_queue_lock();//we should hold mutex when we wait condition
++        /*we should hold mutex when we wait condition*/
++        optimize_queue_lock();
+ 
+         while (QSIMPLEQ_EMPTY(&paths)) {
+             pthread_cond_wait(&condition, &lock);
+         }
+ 
+         hotpath_node* hpath = QSIMPLEQ_FIRST(&paths);
+-        QSIMPLEQ_REMOVE_HEAD(&paths, entry);//mybe there is a bug
++        QSIMPLEQ_REMOVE_HEAD(&paths, entry);
+ 
+         optimize_queue_unlock();
+         /*TO DO: add optimize function in here*/
+ 
+-        //fprintf(stdout,"trace size is: %d\n", hpath->trace_size);
+-        TranslationBlock* new_tb_arrray[hpath->trace_size];
+-        memset(new_tb_arrray, 0, sizeof(new_tb_arrray));
+-
+-        for(int i = 0; i < hpath->trace_size; ++i) {
+-           tb = hpath->trace[i];
+-           //printf("tb: %p\n", tb->pc);
+-           /*invalidate one TB, first please set cflags  as CF_INVALID
+-            * Maybe there is implicate buge, after setting CFINVALID, we can correct invalidate one TB;
+-           */
+-          if(tb->cflags & CF_INVALID) {
+-            continue;
+-          }
+-           pc = tb->pc;
+-           flags = tb->flags;
+-           /*maybe cflags is CF_INVALID in other opsition, so save it*/
+-           cflags = (tb->cflags & ~CF_INVALID) | 1;
+-           cs_base = tb->cs_base;
+-           cflags |= CF_RETRANSLATE;
+-
+-           mmap_lock();
+-
+-
+-
+-           new_tb = tb_gen_code(cpu, pc, cs_base, flags, cflags);
+-           if(new_tb) {
+-            qatomic_set(&tb->new_tb_offset, (new_tb->tc.ptr - tb->tc.ptr) >> 2);
+-            new_tb_arrray[i] = new_tb;
+-            //printf("offset : %d\n", tb->new_tb_offset);
+-           }
+-           mmap_unlock();
+-        }
+-        if(hpath->trace_size > 1) {
+-            for (int i = hpath->trace_size -2; i >= 0; --i) {
+-
+-                 tb = hpath->trace[i];
+-                 //tb_next = hpath->trace[i + 1];
+-                 tb->indirect_branch_addr = (void *)new_tb_arrray[i + 1];//new tb is true; must be fixed
+-
+-                 //printf("tb->indirect_branch_addr is:%ld\n",tb->indirect_branch_addr);
+-                 /* use th next tb as current tb's jump addr,
+-                  * on re_translate in glue function, we will fill jump addr.
+-                 */
+-            }
+-        }
+-        free(hpath);
+-       }
+-       pthread_exit(NULL);
++        GHashTable* g_hash = g_hash_table_new(g_int_hash, g_int_equal);
+ 
+-    return NULL;
++        for (int i = 0; i < hpath->trace_size && hpath->trace[i] != NULL; ++i) {
++            tb = hpath->trace[i];
++            node_count = 0;
++            target_ulong* set =
++                (target_ulong*)malloc(MAX_TREE_NUM * sizeof(target_ulong));
+ 
+-}
+-#endif
++            memset(set, 0, MAX_TREE_NUM * sizeof(target_ulong));
++            TBNode* node = construct_CFG(tb, set, cpu, g_hash);
++            free(set);
++            /*
++                 TODO: ir2 optimization and assemble
+ 
++            */
++            destroy_CFG(node);
++        }
+ 
++        g_hash_table_destroy(g_hash);
+ 
++        free(hpath);
++    }
++    pthread_exit(NULL);
+ 
++    return NULL;
++}
++//#endif
+diff --git a/target/i386/latx/optimization/tunnel-lib.c b/target/i386/latx/optimization/tunnel-lib.c
+index 7942924f06..b5fc51bf45 100644
+--- a/target/i386/latx/optimization/tunnel-lib.c
++++ b/target/i386/latx/optimization/tunnel-lib.c
+@@ -439,7 +439,7 @@ static void reset_tb(TranslationBlock *tb)
+     tb->enable_hot_profile = 0;
+     tb->counter = THRESHOLD_VALUE;
+     tb->new_tb_offset = 1;
+-    tb->indirect_branch_addr = NULL;
++    tb->tbnode = NULL;
+ #endif
+ #ifdef CONFIG_LATX_AOT
+     tb->is_tunnel_lib = true;
+diff --git a/target/i386/latx/translator/translate.c b/target/i386/latx/translator/translate.c
+index ebdff1a472..f38f6c4752 100644
+--- a/target/i386/latx/translator/translate.c
++++ b/target/i386/latx/translator/translate.c
+@@ -1837,25 +1837,6 @@ static int generate_native_jmp_glue(void *code_buf, int n)
+         la_store_addrx(next_x86_addr, env_ir2_opnd,
+                                 lsenv_offset_of_eip(lsenv));
+ 
+-        /**
+-         * superblock optimization in indirect jump
+-         * step 1: load tb->indirect_branch_addr
+-         * step 2: load next_tb
+-         * step 3: if(tb->indirect_branch_addr == x86_addr) {goto fpu_rotate}
+-         *         else {goto search HASH tabel}
+-         * **/
+-        /*prologue/epilogue has no tb, so we should to check whether tb is null or not. */
+-#ifdef CONFIG_LATX_SUPERBLOCK
+-        TranslationBlock *tb = (TranslationBlock *)lsenv->tr_data->curr_tb;
+-
+-        if(tb && (tb->indirect_branch_addr != NULL)) {
+-            IR2_OPND probability_next_x86_pc = ra_alloc_itemp();
+-            TranslationBlock *hot_next_tb = (TranslationBlock *) tb->indirect_branch_addr;
+-            li_d(probability_next_x86_pc, (ADDR)(hot_next_tb->pc));
+-            la_beq(probability_next_x86_pc, next_x86_addr, label_hit);
+-            ra_free_temp(probability_next_x86_pc);
+-        }
+-#endif
+         /*
+          * lookup HASH_JMP_CACHE
+          * Step 1: calculate HASH = (x86_addr >> 12) ^ (x86_addr & 0xfff)
+diff --git a/target/i386/mips/include/lsenv.h b/target/i386/mips/include/lsenv.h
+index 154fa7694a..2670a6a1d8 100644
+--- a/target/i386/mips/include/lsenv.h
++++ b/target/i386/mips/include/lsenv.h
+@@ -49,6 +49,22 @@ static inline int lsenv_offset_of_tb_jmp_cache_ptr(ENV *lsenv)
+     return (int)((ADDR)(&cpu->tb_jmp_cache_ptr) - (ADDR)lsenv->cpu_state);
+ }
+ 
++/*
++superblock optimization
++*/
++static inline int lsenv_offset_of_count(ENV *lsenv)
++{
++    CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
++    return (int)((ADDR)(&cpu->count) - (ADDR)lsenv->cpu_state);
++}
++
++static inline int lsenv_offset_of_unhit(ENV *lsenv)
++{
++    CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
++    return (int)((ADDR)(&cpu->unhit) - (ADDR)lsenv->cpu_state);
++}
++/*end */
++
+ static inline int lsenv_offset_of_eip(ENV *lsenv)
+ {
+     CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
+-- 
+2.34.1
+
