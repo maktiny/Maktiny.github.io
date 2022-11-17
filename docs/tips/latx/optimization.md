@@ -83,6 +83,7 @@ IR2:
 st.w      $s0,$s4,24
 [11, 3] -------   4509923
 ld.wu     $s2,$s4,24
+```
 
 ## IR1层面的指令融合
 ##### pattern 3: IR1层面的消除，cmp-cmovcc  和 test-cmovcc
@@ -143,133 +144,6 @@ IR1:
              cmovg     ZF = 0 and SF = OF = 0  slt rd $zero A  | 0 < A
 
 ```
-
-##### pattern 3: IR1层面的消除，cmp-cmovcc  和 test-cmovcc
-
-```c
-IR1:
-	cmp     rax, -1
-   	cmove   rax, rdx
-
- IR2:
-  [5, 2] -------   4886494
-  169390 ld.b      ^[[31mitmp0^[[m,$s4,79
-  169391 x86sub.b  ^[[31mitmp0^[[m,$zero
-  169392 [8, 3] -------   4886499
-  169393 setx86j   ^[[31mitmp0^[[m,5     //cmp_cmovcc联合翻译， setx86j指令可以消除
-  169394 masknez   ^[[32mitmp1^[[m,$t8,^[[31mitmp0^[[m
-  169395 maskeqz   ^[[33mitmp2^[[m,$s0,^[[31mitmp0^[[m
-  169396 or        $t8,^[[32mitmp1^[[m,^[[33mitmp2^[[m
-
-
- cmove
- cmovne
-
- cmovle
- cmovl
-
- cmova
- cmovae
-
- cmovb
- cmovbe
-
- cmovg
- cmovge
-
-
-
-```
-
-* CMP    A    B    unsigned      cmp-cmovcc
-
-  ```c
-  CMP   A       B   unsigned
-   >  cmova   cf = 0 zf = 0      sltu rd  B  A  | B < A
-   >= cmovae  cf = 0 zf = 0/1    sltu rd  A  B  | A < B  使用cmp_flag masknez和maskeqz顺序取反
-   <  cmovb   cf = 1 zf = 0      sltu rd  A  B  | A < B
-   <= cmovbe  cf = 1 or zf = 1   sltu rd  B  A  | B < A   使用cmp_flag
-  ```
-
-* CMP    A       B    signed     cmp-cmovcc
-
-  ```c
-  CMP   A       B   signed
-  >   cmovg    ZF = 0 and SF = OF  slt rd  B  A  | B < A
-  =   cmove    ZF = 1              sub rd  A  B  | A = B
-  !=  cmovne   ZF = 0              sub rd  A  B  | A != B
-  >=  cmovge   SF = OF             slt rd  A  B  | A < B   使用cmp_flag
-  <   cmovl    SF != OF            slt rd  A  B  | A < B
-  <=  cmovle   ZF = 1 or SF != OF  slt rd  B  A  | B < A   使用cmp_flag
-
-      (A >= B)---> !(A < B)---->  !(slt A, B)
-               //下面这两个还不确定，先不实现
-                     cmovs    SF = 1
-                     cmovns   SF = 0
-
-  ```
-
-* TEST   A             B        test-cmovcc
-
-  ```c
-             cmovs     SF = 1                  slt rd A  $zero | A < 0
-             cmovns    SF = 0                  slt rd $zero A  | 0 < A
-             cmove     ZF = 1                  and rd A  B     | rd = 0
-             cmovne    ZF = 0                  and rd A  B     | rd != 0
-             cmovle    ZF = 1 or SF != OF      slt rd $zero A  | 0 < A    使用cmp_flag
-             cmovg     ZF = 0 and SF = OF = 0  slt rd $zero A  | 0 < A
-
-
-
-         b cpu_tb_exec if itb->pc == 0x0000003ffffaeccb
-  ```
-
-
-
-##### pattern4: IR1层面的消除：cmpxchg-jcc 主要是cmpxchg-je,  cmpxchg-jne，主要是ZF的判断
-
-```c
-  IR1:
-		 IR1[0] 0x554677:    cmpxchg     dword ptr [rbp], esi
-  205015 IR1[1] 0x55467b:    je      0x554694
-
-
-  IR2:
-  205017 [0, 0] -------   5588599
-  205018 slli.w    ^[[31mitmp0^[[m,$s0,0
-  205019 ld.w      ^[[32mitmp1^[[m,$s5,0
-  205020 slli.w    ^[[33mitmp2^[[m,$s6,0
-  205021 x86sub.w  ^[[31mitmp0^[[m,^[[32mitmp1^[[m
-  205022 bne       ^[[32mitmp1^[[m,^[[31mitmp0^[[m,LABEL 1
-  205023 st.w      ^[[33mitmp2^[[m,$s5,0
-  205024 b         LABEL 2
-  205025    -->    LABEL 1
-  205026 bstrpick.d  $s0,^[[32mitmp1^[[m,31,0
-  205027    -->    LABEL 2
-  205028 [11, 1] -------   5588603
-  205029 setx86j   ^[[31mitmp0^[[m,4
-  205030 bne       ^[[31mitmp0^[[m,$zero,LABEL 3
-  205031    -->    LABEL 4
-  205032 b         0
-  205033 and       $zero,$zero,$zero
-  205034 lu12i.w   $fp,0xd0109
-  205035 ori       $fp,$fp,0x700
-  205036 lu32i.d   $fp,255
-  205037 lu12i.w   $x,0x554
-  205038 ori       $x,$x,0x67d
-  205039 ori       ^[[36mitmp6^[[m,$fp,0x0
-  205040    -->    LABEL 5
-  205041 b         -271817
-  205042 and       $zero,$zero,$zero
-  205043    -->    LABEL 3
-  205044    -->    LABEL 6
-  205045 b         0
-
-```
-
-
-         b cpu_tb_exec if itb->pc == 0x0000003ffffaeccb
-  ```
 
 
 
