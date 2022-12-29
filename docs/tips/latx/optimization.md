@@ -1,9 +1,102 @@
-#### peephole optimization
+##### 其他修改
+```c
+IR1 num = 6
+IR1[0] 0x447df7:	movsd		xmm1, qword ptr [rsp + 8]
 
+IR2 num = 39
+[0, 0] -------   4488695
+fld.d     [34mftmp0[m,$s4,8
+xvpickve.d  $ft9,[34mftmp0[m,0   其实可以fld一条指令做完
+```
+
+#### zero extension的消除(高32清零的消除优化)
+1. 高32位清零 常常使用store_ireg_to_ir1()--->store_ireg_to_ir1_gpr()-->la_mov32_zx()--->bstrpick()
+```c
+store_ireg_to_ir1(IR1_INST* pir1, IR2_OPND opnd2, IR1_OPND *opnd1, bool is_xmm_hi)
+                                     |                    |
+                                   IR2-dest             IR1-dest
+r1_is_tb_ending(),遍历IR1结尾的判断。 
+```
+2. 模式:从前往后遍历，如果后面用到eax作为目的寄存器并且其他的指令没有把rax放到内存的操作，则可以不用高位清零，
+高位的清零放到后面来做。(在store_ireg_to_ir1_gpr()中来做该操作)
+* Questioin: 怎么识别8个GPR(eax, ebx...):switch case ?
+
+3. 把eax用作目的寄存器要排除cmp,test,等指令，这些指令的计算结果并没有存入eax，
+```asm
+IR1[0] 0x4ecfb6:	mov		ebx, dword ptr [rdi]
+IR1[1] 0x4ecfb8:	mov		esi, ebx # esi的高位清零可以不用做，后面的指令可以把高位覆盖了
+IR1[2] 0x4ecfba:	not		esi      # 只要后面没有把esi存入内存的操作都可不清零
+IR1[3] 0x4ecfbc:	or		eax, esi
+IR1[4] 0x4ecfbe:	mov		dword ptr [rsp + 0x78], eax
+IR1[5] 0x4ecfc2:	mov		edi, dword ptr [rdi + 4]
+IR1[6] 0x4ecfc5:	mov		esi, edi
+IR1[7] 0x4ecfc7:	mov		dword ptr [rsp + 8], edi
+IR1[8] 0x4ecfcb:	not		esi
+IR1[9] 0x4ecfcd:	or		ecx, esi
+IR1[10] 0x4ecfcf:	mov		dword ptr [rsp + 0x7c], ecx
+IR1[11] 0x4ecfd3:	not		eax
+IR1[12] 0x4ecfd5:	test		dword ptr [rip + 0x3a2415], eax
+IR1[13] 0x4ecfdb:	jne		0x4ed054
+IR2 num = 61
+[0, 0] -------   5164982
+ld.wu     $s3,$s7,0
+[2, 1] -------   5164984
+bstrpick.d  $s6,$s3,31,0
+[4, 2] -------   5164986
+nor       $s6,$zero,$s6
+bstrpick.d  $s6,$s6,31,0
+[7, 3] -------   5164988
+or        $s0,$s0,$s6
+bstrpick.d  $s0,$s0,31,0
+[10, 4] -------   5164990
+st.w      $s0,$s4,120
+[12, 5] -------   5164994
+ld.wu     $s7,$s7,4
+[14, 6] -------   5164997
+bstrpick.d  $s6,$s7,31,0
+[16, 7] -------   5164999
+st.w      $s7,$s4,8
+[18, 8] -------   5165003
+nor       $s6,$zero,$s6
+bstrpick.d  $s6,$s6,31,0
+[21, 9] -------   5165005
+or        $s1,$s1,$s6
+bstrpick.d  $s1,$s1,31,0
+[24, 10] -------   5165007
+st.w      $s1,$s4,124
+[26, 11] -------   5165011
+nor       $s0,$zero,$s0
+bstrpick.d  $s0,$s0,31,0
+[29, 12] -------   5165013
+lu12i.w   [32mitmp1[m,0x88f
+ori       [32mitmp1[m,[32mitmp1[m,0x3f0
+ld.w      [31mitmp0[m,[32mitmp1[m,0
+x86and.w  [31mitmp0[m,$s0
+[34, 13] -------   5165019
+```
+##### 浮点向量高位清零操作的消除
+```asm
+IR1:
+IR1[12] 0x4ebb13:	cvtsi2sd		xmm1, eax
+IR1[13] 0x4ebb17:	divsd		xmm0, xmm1
+
+
+IR2:
+[44, 12] -------   5159699
+movgr2fr.d  [34mftmp0[m,$s0
+ffint.d.w  [34mftmp0[m,[34mftmp0[m
+vextrins.d  $ft9,[34mftmp0[m,0       #这里可以消除
+[48, 13] -------   5159703
+fdiv.d    [34mftmp0[m,$ft8,$ft9
+xvinsve0.d  $ft8,[34mftmp0[m,0     #这里也可以消除
+```
+
+
+#### peephole optimization
 ##### pattern 1 : push/pop的消除
 * 直接对st.d和addi.d的模式进行识别，有几个st.d和addi.d的模式对进行计数n，
 
-```
+```asm
 ir2:
 push		r15
 push		r14
@@ -20,8 +113,6 @@ addi.d    $s4,$s4,-8
 
 ## 一次遍历得到n，然后offset = n * 4;
 在最后一个push的时候才进行更新栈指针esp(s4)，addi.d    $s4,$s4,-offset
-
-
 
 ```
 ##### pattern 2: 当目的寄存器是$zero的时候，可以消除该指令   (Done)
@@ -70,19 +161,6 @@ ld.wu     $s2,$s4,24
 ```asm
 IR1 :
 
-```
-
-##### pattern 3: 不是常见的模式,不具有一般性
-
-```c
-IR1；
-    mov             dword ptr [rsp + 0x18], eax
-    mov             edx, dword ptr [rsp + 0x18]
-
-IR2:
-st.w      $s0,$s4,24
-[11, 3] -------   4509923
-ld.wu     $s2,$s4,24
 ```
 
 ## IR1层面的指令融合
@@ -144,8 +222,6 @@ IR1:
              cmovg     ZF = 0 and SF = OF = 0  slt rd $zero A  | 0 < A
 
 ```
-
-
 
 ##### pattern4: IR1层面的消除：cmpxchg-jcc 主要是cmpxchg-je,  cmpxchg-jne，主要是ZF的判断
 
