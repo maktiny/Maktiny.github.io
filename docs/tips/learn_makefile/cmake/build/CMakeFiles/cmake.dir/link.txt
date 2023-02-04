@@ -1,0 +1,1 @@
+/usr/bin/cc -rdynamic CMakeFiles/cmake.dir/main.c.o -o cmake  src/libmathfunction.a 
