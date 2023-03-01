@@ -7,7 +7,25 @@ google_analytics: true
 theme: jekyll-theme-cayman
 author: Maktiny
 ---
+<form action="https://tinyletter.com/kaush"
+      class="newsletter"
+      method="post"
+      target="popupwindow"
+      onsubmit="window.open('https://tinyletter.com/kaush', 'popupwindow', 'scrollbars=yes,width=800,height=600');return true">
+    <input type="text" name="email" id="tlemail" placeholder="Enter your email address ..."/>
+    <input type="submit" value="Subscribe to my newsletter"/>
+</form>
 
+<!-- you probably also want to re-add the original site-nav -->
+<nav class="site-nav">
+    <ul>
+        <li><a class="nav-link" href="/">posts</a></li>
+        <li><a class="nav-link" href="{{ site.author.bio-url }}">homepage</a></li>
+        <li><a class="nav-link" href="/about/">about</a></li>
+        <li><a class="nav-link site-title" href="{{ site.url }}/categories">categories</a></li>
+        <li><a class="nav-link" href="{{ site.url }}/feed.xml">rss</a></li>
+    </ul>
+</nav>
 
 
 ## Navigation

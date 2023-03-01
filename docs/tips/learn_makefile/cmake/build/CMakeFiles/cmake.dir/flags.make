@@ -4,7 +4,7 @@
 # compile C with /usr/bin/cc
 C_DEFINES = 
 
-C_INCLUDES = 
+C_INCLUDES = -I/home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/cmake/src
 
 C_FLAGS = 
 

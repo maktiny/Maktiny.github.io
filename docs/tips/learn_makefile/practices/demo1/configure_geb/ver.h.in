@@ -1,0 +1,8 @@
+#ifndef __VER_H_
+#define __VER_H_
+
+//参数configure_example_VERSION来自CMakeLists.tst
+const char* ver = "${configure_example_VERSION}";
+
+
+#endif

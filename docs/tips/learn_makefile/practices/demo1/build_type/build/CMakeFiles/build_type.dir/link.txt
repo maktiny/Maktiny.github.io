@@ -1,0 +1,1 @@
+/usr/bin/c++  -std=c++11 -rdynamic CMakeFiles/build_type.dir/main.cpp.o -o build_type 

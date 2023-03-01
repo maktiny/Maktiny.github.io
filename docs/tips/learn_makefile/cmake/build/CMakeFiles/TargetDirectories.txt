@@ -1,6 +1,10 @@
 /home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/cmake/build/CMakeFiles/cmake.dir
+/home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/cmake/build/CMakeFiles/package.dir
+/home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/cmake/build/CMakeFiles/package_source.dir
 /home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/cmake/build/CMakeFiles/edit_cache.dir
 /home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/cmake/build/CMakeFiles/rebuild_cache.dir
 /home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/cmake/build/src/CMakeFiles/mathfunction.dir
+/home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/cmake/build/src/CMakeFiles/package.dir
+/home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/cmake/build/src/CMakeFiles/package_source.dir
 /home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/cmake/build/src/CMakeFiles/edit_cache.dir
 /home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/cmake/build/src/CMakeFiles/rebuild_cache.dir

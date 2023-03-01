@@ -1,0 +1,3 @@
+/home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/practices/demo1/build_type/build/CMakeFiles/build_type.dir
+/home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/practices/demo1/build_type/build/CMakeFiles/edit_cache.dir
+/home/liyi/programs/homepage/Maktiny.github.io/docs/tips/learn_makefile/practices/demo1/build_type/build/CMakeFiles/rebuild_cache.dir
