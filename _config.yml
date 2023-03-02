@@ -2,7 +2,7 @@ theme: jekyll-theme-cayman
 comments: true
 gitment:
   enable: true
-  id: '' #页面 ID, 可选。默认为 location.href
+  id: 'page.data' #页面 ID, 可选。默认为 location.href
   owner: Maktiny
   repo:  Maktiny.github.io #存储评论的 repo
   client_id: '657676473241d979de98' #你的 Client ID
