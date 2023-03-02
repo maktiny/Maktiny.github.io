@@ -8,7 +8,7 @@ theme: jekyll-theme-cayman
 author: Maktiny
 ---
 
-![Dusai's GitHub stats](https://github-readme-stats.vercel.app/api?username=Maktiny&show_icons=true&theme=radical)
+<div align=center>![Dusai's GitHub stats](https://github-readme-stats.vercel.app/api?username=Maktiny&show_icons=true)
 
 
 
