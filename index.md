@@ -90,7 +90,7 @@ comments: true
 <!--评论系统的插件-->
 <!--评论系统教程 http://xichen.pub/2018/01/31/2018-01-31-gitment/     -->
 
-
+<!--
 <div id="gitment_container"></div>
 
 <link rel="stylesheet" href="https://imsun.github.io/gitment/style/default.css">
@@ -109,3 +109,5 @@ comments: true
     })
     gitment.render('gitment_container')
 </script>
+-->
+
