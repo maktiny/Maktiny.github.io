@@ -7,7 +7,7 @@ google_analytics: true
 theme: jekyll-theme-cayman
 author: Maktiny
 ---
-
+<!--顶部的统计信息-->
 ![Dusai's GitHub stats](https://github-readme-stats.vercel.app/api?username=Maktiny&show_icons=true)
 
 
@@ -50,6 +50,7 @@ author: Maktiny
 *   [utopianfuture](https://utopianfuture.github.io/)
 *   [Martins3](https://martins3.github.io/)
 
+<!--评论系统的插件-->
 <script src="https://utteranc.es/client.js"
         repo="https://github.com/maktiny/Maktiny.github.io"
         issue-term="pathname"
@@ -58,3 +59,33 @@ author: Maktiny
         async>
 </script>
 
+const BlogPost = ({ data, pageContext, location }) => {
+  ...
+  return (
+    <Layout location={location} title={siteTitle}>
+      <Seo/>
+      <article
+        className="blog-post"
+        itemScope
+        itemType="http://schema.org/Article"
+      >
+        <header>
+         ...
+        </header>
+        <section
+          dangerouslySetInnerHTML={{ __html: post.html }}
+          itemProp="articleBody"
+        />
+        <hr />
+        <footer>
+          ...
+        </footer>
+        <hr />
+        <Comments/> {/* <-- The comment box is embeded at the bottom of the blog post page */}
+      </article>
+      <nav className="blog-post-nav">
+       ...
+      </nav>
+    </Layout>
+  )
+}
