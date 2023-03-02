@@ -91,4 +91,23 @@ comments: true
 *   [Martins3](https://martins3.github.io/)
 
 <!--评论系统的插件-->
+<!--评论系统教程 http://xichen.pub/2018/01/31/2018-01-31-gitment/     -->
 
+
+<% if (theme.gitment.client_id && theme.gitment.client_secret && theme.gitment.enable ){ %>
+    <div id="gitment_container"></div>
+    <link rel="stylesheet" href="https://imsun.github.io/gitment/style/default.css">
+    <script src="https://imsun.github.io/gitment/dist/gitment.browser.js"></script>
+    <script>
+    var gitment = new Gitment({
+        id: 'page.data',
+        owner: 'Maktiny',
+        repo: 'Maktiny.github.io',
+        oauth: {
+            client_id: '657676473241d979de98',
+            client_secret: 'ba14ae9c186b2da0eb7b295f95e86772de22c1f2',
+        },
+    })
+    gitment.render('gitment_container')
+    </script>
+<% } %>
