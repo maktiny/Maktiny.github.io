@@ -50,7 +50,6 @@ author: Maktiny
 *   [utopianfuture](https://utopianfuture.github.io/)
 *   [Martins3](https://martins3.github.io/)
 
-
 <script src="https://utteranc.es/client.js"
         repo="https://github.com/maktiny/Maktiny.github.io"
         issue-term="pathname"
@@ -59,3 +58,4 @@ author: Maktiny
         crossorigin="anonymous"
         async>
 </script>
+
