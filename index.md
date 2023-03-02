@@ -49,3 +49,13 @@ author: Maktiny
 *   [SPC的自由天空](https://blog.spcsky.com/)
 *   [utopianfuture](https://utopianfuture.github.io/)
 *   [Martins3](https://martins3.github.io/)
+
+
+<script src="https://utteranc.es/client.js"
+        repo="https://github.com/maktiny/Maktiny.github.io"
+        issue-term="pathname"
+        label="Comment"
+        theme="github-light"
+        crossorigin="anonymous"
+        async>
+</script>

@@ -25,7 +25,6 @@ Here are some ideas to get you started:
 <p align="center">
     <img src="https://img.shields.io/badge/gender-%F0%9F%A4%B5 gentleman-critical">
     <img src="https://img.shields.io/static/v1?label=wechat&message=LiXuCherry&color=7BB32E&logo=wechat">
-   [comment]: <> (    <img src="https://badges.frapsoft.com/os/v1/open-source.svg?v=102" alt="Open Source Love">)
 </p>
 
 <br/>
