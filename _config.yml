@@ -7,3 +7,5 @@ gitment:
   repo:  Maktiny.github.io #存储评论的 repo
   client_id: '657676473241d979de98' #你的 Client ID
   client_secret: 'ba14ae9c186b2da0eb7b295f95e86772de22c1f2' #你的 Client secret
+  redirect_uri: 'https://github.com/maktiny/Maktiny.github.io'
+
