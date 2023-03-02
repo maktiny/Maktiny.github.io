@@ -19,18 +19,15 @@ comments: true
 <p align="center">
     <img src="https://readme-typing-svg.herokuapp.com?color=e65e2a&width=380&height=45&lines=linux+kernel+developer;Self-taught+Code+Designer;Always+learning+new+things">
 </p>
-
 <p align="center">
     <img src="https://img.shields.io/badge/gender-%F0%9F%A4%B5 gentleman-critical">
     <img src="https://img.shields.io/static/v1?label=wechat&message=LiXuCherry&color=7BB32E&logo=wechat">
 </p>
-
 <br/>
 
 🎉 **Welcome to my GitHub profile!**
 
-
-𝑯𝒊, 𝑰'𝒎 ✨ Maktiny ✨, 𝒂 𝒑𝒂𝒔𝒔𝒊𝒐𝒏𝒂𝒕𝒆 ✨ linux kernel ✨ 𝒅𝒆𝒗𝒆𝒍𝒐𝒑𝒆𝒓 𝒂𝒏𝒅 𝒂  𝒔𝒐𝒇𝒕𝒘𝒂𝒓𝒆 ✨ software engineer ✨  𝒇𝒓𝒐𝒎 𝑪𝒉𝒊𝒏𝒂. <img src="https://media.giphy.com/media/WUlplcMpOCEmTGBtBW/giphy.gif" width="30"> 𝑰 𝒕𝒂𝒌𝒆 𝒈𝒓𝒆𝒂𝒕 𝒄𝒂𝒓𝒆 𝒊𝒏 𝒕𝒉𝒆 𝒂𝒓𝒄𝒉𝒊𝒕𝒆𝒄𝒕𝒖𝒓𝒆 𝒂𝒏𝒅 𝒄𝒐𝒅𝒆 𝒒𝒖𝒂𝒍𝒊𝒕𝒚 𝒐𝒇 𝒕𝒉𝒆 𝒕𝒉𝒊𝒏𝒈𝒔 𝑰 𝒃𝒖𝒊𝒍𝒅.
+𝑯𝒊, 𝑰'𝒎 ✨ Maktiny ✨, 𝒂 𝒑𝒂𝒔𝒔𝒊𝒐𝒏𝒂𝒕𝒆 ✨ linux kernel developer ✨ 𝒂𝒏𝒅 𝒂 ✨ software engineer ✨  𝒇𝒓𝒐𝒎 𝑪𝒉𝒊𝒏𝒂. <img src="https://media.giphy.com/media/WUlplcMpOCEmTGBtBW/giphy.gif" width="30"> 𝑰 𝒕𝒂𝒌𝒆 𝒈𝒓𝒆𝒂𝒕 𝒄𝒂𝒓𝒆 𝒊𝒏 𝒕𝒉𝒆 𝒂𝒓𝒄𝒉𝒊𝒕𝒆𝒄𝒕𝒖𝒓𝒆 𝒂𝒏𝒅 𝒄𝒐𝒅𝒆 𝒒𝒖𝒂𝒍𝒊𝒕𝒚 𝒐𝒇 𝒕𝒉𝒆 𝒕𝒉𝒊𝒏𝒈𝒔 𝑰 𝒃𝒖𝒊𝒍𝒅.
 
 🛠️ **Languages and Tools:**
 <p>
@@ -94,11 +91,10 @@ comments: true
 <!--评论系统教程 http://xichen.pub/2018/01/31/2018-01-31-gitment/     -->
 
 
-<% if (theme.gitment.client_id && theme.gitment.client_secret && theme.gitment.enable ){ %>
-    <div id="gitment_container"></div>
-    <link rel="stylesheet" href="https://imsun.github.io/gitment/style/default.css">
-    <script src="https://imsun.github.io/gitment/dist/gitment.browser.js"></script>
-    <script>
+<div id="gitment_container"></div>
+<link rel="stylesheet" href="https://imsun.github.io/gitment/style/default.css">
+<script src="https://imsun.github.io/gitment/dist/gitment.browser.js"></script>
+<script>
     var gitment = new Gitment({
         id: 'page.data',
         owner: 'Maktiny',
@@ -109,5 +105,4 @@ comments: true
         },
     })
     gitment.render('gitment_container')
-    </script>
-<% } %>
+</script>
