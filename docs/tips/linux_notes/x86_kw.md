@@ -72,3 +72,13 @@ uClibc比一般用于Linux发行版的C库GNU C Library (glibc)要小得多， u
 
 11. Newlib是一个面向嵌入式系统的C运行库。最初是由Cygnus Solutions收集组装的一个源代码集合，取名为newlib，现在由Red Hat维护
 Newlib并不是唯一的选择，但是从成熟度来讲，newlib是最优秀的, 相比Minilibc更加健全
+
+12. 把一个不知道长度的数组最后一个有效元素置0：
+```c
+//PROCFS_MAX_SIZE 数组最大长度, 当前有效位的长度procfs_buffer_size 
+procfs_buffer[procfs_buffer_size & (PROCFS_MAX_SIZE - 1)] = '\0';
+```
+
+13. 内核态的代码用 GDT 里的数据段和代码段，而用户进程的代码用每个用户进程自己的 LDT 里得数据段和代码段。
+14. 超级块superblock用于描述整个文件系统的整体信息，superblock描述了该磁盘使用的文件系统的格式(ext4)等信息。
+15. 每个信号只有一个信号处理函数，当第二次信号处理函数注册时，前面注册的信号处理函数被覆盖.
