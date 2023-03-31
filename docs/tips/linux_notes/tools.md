@@ -4,7 +4,12 @@
 2. grep -rn "内容" 路径  #遍历路径下的所有文件，字符串匹配" "中的内容
 3. grep -rn  "sel" . | wc -l    #对匹配计数
 
-
+## bear的使用
+* bear的新版本改动
+```sh
+// 当使用bear命令生成compile_commands.json索引文件的时候，新版本的bear需要加上"--"
+    bear -- make -j6 
+```
 ## fmt
 1. echo ':x86_64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00:\xff\xff\xff\xff\xff\xfe\xfe\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/tmp/qemu-x86_64:C' > /proc/sys/fs/binfmt_misc/register
    echo -1 > 文件路径, 当一个文件不能写入的时候， ”echo -1 > 路径“ 修改权限并清空
