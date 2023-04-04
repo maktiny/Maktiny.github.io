@@ -138,10 +138,71 @@ struct kvm_kernel_irq_routing_entry {
 
 ```
 
+##### 中断处理流程
+1. qemu用户态有个函数kvm_set_irq，这个函数是用户态通知kvm内核态触发一个中断的入口。函数中通过调用 kvm_vm_ioctl注入一个中断，
+2. <mark>中断注入实际上就是设置vcpu的一个request标志,会在kvm_enter_guest时候根据request进行处理</mark>
+```c
+kvm_ioapic_class_init()
+----->kvm_ioapic_init()
+     -------->kvm_ioapic_set_irq()
+                 ------->kvm_set_irq()
+```
+
+2. 在QEMU中通过kvm_vm_ioctl注入中断，在kvm中的处理方式如下
+```c
+kvm_vm_ioctl() {
+
+	#ifdef CONFIG_HAVE_KVM_IRQ_ROUTING  //ioapic
+	case KVM_SET_GSI_ROUTING: {
+		struct kvm_irq_routing routing;
+		struct kvm_irq_routing __user *urouting;
+		struct kvm_irq_routing_entry *entries = NULL;
+
+		r = -EFAULT;
+		if (copy_from_user(&routing, argp, sizeof(routing)))
+			goto out;
+		r = -EINVAL;
+		if (!kvm_arch_can_set_irq_routing(kvm))
+			goto out;
+		if (routing.nr > KVM_MAX_IRQ_ROUTES)
+			goto out;
+		if (routing.flags)
+			goto out;
+		if (routing.nr) {
+			urouting = argp;
+			entries = vmemdup_user(urouting->entries,
+					       array_size(sizeof(*entries),
+							  routing.nr));
+			if (IS_ERR(entries)) {
+				r = PTR_ERR(entries);
+				goto out;
+			}
+		}
+		//主要处理中断注入的函数
+		r = kvm_set_irq_routing(kvm, entries, routing.nr,
+					routing.flags);
+		kvfree(entries);
+		break;
+	}
+#endif /* CONFIG_HAVE_KVM_IRQ_ROUTING */
+	
+}
+  kvm_set_irq_routing()
+    ---->setup_routing_entry()
+            ------>kvm_set_routing_entry()
+	             ------>kvm_set_ioapic_irq()//IOAPIC使用该函数, PIC使用kvm_set_pic_irq;
+                               ------>kvm_ioapic_set_irq()
+			                 ---->ioapic_service()
+					        --->kvm_irq_delivery_to_apic()//遍历所有的vCPU进行匹配，kvm_apic_match_dest()判断该中断是发送到那个vCPU的,
+                                                        ----->kvm_apic_set_irq()
+								---->__apic_accept_irq()//把中断提交到LOCAL APIC(完全模拟APIC的中断处理流程),根据中断的投递模式进行处理
+								        ------->kvm_make_request()//在满足条件的情况下调用kvm_make_request为vcpu注入中断，然后kick每个vcpu
+								        ------->kvm_vcpu_kick()//中断注入实际上就是设置vcpu的一个request标志,会在kvm_enter_guest时候根据request进行处理 */
 
 
 
 
+```
 
 
 
