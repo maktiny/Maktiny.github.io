@@ -498,7 +498,7 @@ vfio_connect_container()
 	        ---->listener->region_add(listener, &section);//调用vfio_memory_listener.region_add(),也就是vfio_listener_region_add()
                                ------->vfio_listener_region_add()
 					---->vfio_dma_map(container, iova, end - iova, vaddr, section->readonly);//建立iova到物理内存的映射
-
+//该函数需要调用内核的接口才能完成iova到物理地址的映射
 static int vfio_dma_map(VFIOContainer *container, target_phys_addr_t iova,
                         ram_addr_t size, void *vaddr, bool readonly)
 {
@@ -522,19 +522,112 @@ static int vfio_dma_map(VFIOContainer *container, target_phys_addr_t iova,
     return 0;
 }
 ```
-5. 内核中的设置
-
-
-
-
-### 中断重映射
-1. 
+##### 内核中的设置IOMMU derive
 
 ```c
+//在内核中IOMMU derive 作为一个独立的module注册到内核的
+static const struct vfio_iommu_driver_ops vfio_iommu_driver_ops_type1 = {
+	.name			= "vfio-iommu-type1",
+	.owner			= THIS_MODULE,
+	.open			= vfio_iommu_type1_open,
+	.release		= vfio_iommu_type1_release,
+	.ioctl			= vfio_iommu_type1_ioctl, /// iommu命令的处理函数
+	.attach_group		= vfio_iommu_type1_attach_group,
+	.detach_group		= vfio_iommu_type1_detach_group,
+	.pin_pages		= vfio_iommu_type1_pin_pages,
+	.unpin_pages		= vfio_iommu_type1_unpin_pages,
+	.register_device	= vfio_iommu_type1_register_device,
+	.unregister_device	= vfio_iommu_type1_unregister_device,
+	.dma_rw			= vfio_iommu_type1_dma_rw,
+	.group_iommu_domain	= vfio_iommu_type1_group_iommu_domain,
+	.notify			= vfio_iommu_type1_notify,
+};
 
+static int __init vfio_iommu_type1_init(void)
+{
+	return vfio_register_iommu_driver(&vfio_iommu_driver_ops_type1);
+}
+
+
+vfio_iommu_type1_ioctl()
+  --->vfio_iommu_type1_map_dma()
+        ---->vfio_dma_do_map() 
+	      ------>vfio_find_dma()//将用户数据映射到DMA空间,就是分配iova
+	      ------>vfio_link_dma() //将iova空间插入到红黑树
+/*内核完成建立iova到物理内存的映射之前会将分配的DMA内存给pin住，使用vfio_pin_pages_remote接口可以获取到虚拟地址对应的物理地址和pin住的页数量，
+然后vfio_iommu_map进而调用iommu以及smmu的map函数，最终用iova，物理地址信息pfn以及要映射的页数量在设备IO页表中建立映射关系
+*/
+	      ------>vfio_pin_map_dma()
+	               ----->vfio_pin_pages_remote()
+		       ----->vfio_iommu_map()
+		                --->iommu_map() 
+				     ----_iommu_map()
+				         --->__iommu_map()
+					      --->__iommu_map_pages()//最后调用iommu_domain_ops 注册的map函数完成iova到物理地址的映射过程
 ```
 
 
+
+### 中断重映射(QEMU handle)
+1. 对于PCIe直通设备中断的虚拟化，主要包括三种类型INTx,Msi和Msi-X。传统的INTx中断多在PCI设备上使用,Msi中断的中断号必须连续,Msi-x是Msi的扩展,
+Msi-x中断的中断号可以不连续,当Msi/Msi-x打开时INTx中断自动关闭,Msi/Msi-x中断可以同时打开,取决于硬件的设计支持
+
+2. INTx中断的初始化
+```c
+/*
+对于INTx类型的中断，在初始化的时候就进行使能了，qemu通过VFIO device的接口将中断irq set设置到内核中，
+并且会注册一个eventfd，设置了eventfd的handler，当发生intx类型的中断时，内核会通过eventfd通知qemu进行处理，qemu会通知虚拟机进行处理。
+*/
+vfio_initfn()
+  --->vfio_enable_intx()
+       --->event_notifier_init(&vdev->intx.interrupt, 0);//初始化一个eventfd
+       --->qemu_set_fd_handler(irq_set_fd.fd, vfio_intx_interrupt, NULL, vdev);//vfio_intx_interrupt是一个函数指针
+             ---->qemu_set_fd_handler2()//初始化IOHandlerRecord *ioh, 并插入到全局的io_handlers中
+	            ----->qemu_notify_event();
+
+	//其中vfio_intx_interrupt()
+vfio_intx_interrupt()
+    --->qemu_set_irq()
+         --->irq->handler(irq->opaque, irq->n, level);//调用irq初始化时注册的中断处理函数
+//中断处理函数在kvm_ioapic_init()初始化时注册的kvm_ioapic_set_irq()
+     kvm_ioapic_set_irq()
+         -->kvm_set_irq()
+	      --->kvm_vm_ioctl()//调用kvm的接口设置
+	            --->ioctl() //ioctl is a sytem call , system call's handler is kvm_vm_ioctl() in kernel  --->virtuial_interrupt.md 中断注入
+```
+
+3. Msi-x中断的初始化
+* 当虚拟机因为写PCI配置空间而发生VM-exit时，最终会完成msi和msix的使能，以MSIX的使能为例，在qemu侧会设置eventfd的处理函数，并通过kvm将irqfd注册到内核中，进而注册虚拟中断给虚拟机
+```c
+
+vfio_pci_dev_class_init() //QEMU的PCI类设备初始化的时候注册vfio_pci_write_config()和vfio_initfn()
+-->vfio_pci_write_config()
+     ---->msix_enabled()
+-->vfio_intifn()
+  --->vfio_add_capabilities()
+        --->vfio_add_std_cap()
+	     --->vfio_setup_msi()
+	     --->vfio_setup_msix()
+	          ---->msix_init()
+		  ---->ret = msix_set_vector_notifiers(&vdev->pdev, vfio_msix_vector_use,
+                                    vfio_msix_vector_release); //注册中断向量,vfio_msix_vector_use函数指针
+
+vfio_msix_vector_use()
+   --->vector->virq = kvm_irqchip_add_msi_route(kvm_state, msg)
+              ---->kvm_irqchip_get_virq()
+	            --->kvm_flush_dynamic_msi_routes()
+		         --->kvm_irqchip_release_virq()
+			       ---->kvm_irqchip_commit_routes()
+			             --->ret = kvm_vm_ioctl(s, KVM_SET_GSI_ROUTING, s->irq_routes)
+				                --->ioctl()---> //ioctl is a sytem call , system call's handler is kvm_vm_ioctl() in kernel  --->virtuial_interrupt.md 中断注入
+   --->qemu_set_fd_handler(event_notifier_get_fd(&vector->interrupt),
+                            vfio_msi_interrupt, NULL, vector);
+    vfio_msi_interrupt()//中断处理函数
+        --->msix_notify()
+	      ---stl_le_phys()//把eventfd的数据写入到相应的内存位置.
+	--->msi_notify()
+    
+```
 
 
 
