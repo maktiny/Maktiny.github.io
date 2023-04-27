@@ -180,8 +180,14 @@ boot_sys()
           --->init_cpu()     //sel4内核初始化最重要的两个函数,所有sel4概念的数据结构都在init_cpu, inti_sys_state中初始化
           --->init_sys_state()
       --->ioapic_init()
+           ----->single_ioapic_init()
+     ---->clh_lock_init() //coherent-FIFO lock 如果支持SMP,需要持有大内核锁(BKL),在linux2.0引入SMP和BKL,之后BKL向细粒度的spin lock过渡,BKL逐渐不再使用
+     ---->start_boot_aps() //
+---->schedule();
+---->activateThread();
+}
 ```
-2. init_cpu函数主要设置x86_64架构相关的配置
+##### init_cpu函数主要设置x86_64架构相关的配置
 
 ```c 
 init_cpu()
@@ -266,7 +272,8 @@ BEGIN_FUNC(x64_install_tss)
 END_FUNC(x64_install_tss)
 ```
 
-3.  init_sys_state()函数开始构建sel4独有的capability相关的数据结构的初始化(sel4相关的结构体初始化,所有一整套体系开始构建)
+##### init_sys_state()函数开始构建sel4独有的capability相关的数据结构的初始化(sel4相关的结构体初始化,所有一整套体系开始构建)
+1. sel4有一个根线程叫做rootserver
 ```c 
 inti_sys_state()
   //做一些地址的转换
@@ -295,8 +302,15 @@ inti_sys_state()
   ---->write_it_asid_pool() //把seL4_CapInitThreadASIDPool放入到x86KSASIDTable中
   ---->create_idle_thread()
   ---->create_initial_thread()
-  ---->init_core_state()
-  ---->create_untypeds()
+  ---->init_core_state() //通过宏NODE_STATE设置全局参数ksCurThread等
+  ---->create_untypeds()// ndks_boot.bi_frame->untypedList[i]所有untyped的capability都存在这数组里
+       // 所有的untyped不能超过CONFIG_MAX_NUM_BOOTINFO_UNTYPED_CAPS 50个
+       //create_untypeds()把KERNEL_ELF_PADDR_BASE 0x100000之后的地址空间以及ndks_boot.freemem[i]都转化为ndks_boot.bi_frame->untypedList[i]
+       //不清楚ndks_boot.reserved[] 和ndks_boot.freemem[]的用法和区别?????
+       ---->create_untypeds_for_region()
+             ---->provide_untyped_cap() //ndks_boot.bi_frame->untypedList[i]
+
+  ---->bi_finalise() //更新 ndks_boot.bi_frame->empty,把CSpace中空间的CSlot组织起来
 ```
 * 根据grub提供的信息,把分配的空闲物理内存组织起来(如何组织?还没看懂)
 * boot_state 是全局变量, boot_state->mem_p_regs 管理sel4的全部物理内存
@@ -386,7 +400,7 @@ typedef struct {
 
 extern rootserver_mem_t rootserver;
 ```
-#### CNode/capability的描述
+##### CNode/capability的描述
 1. CNode就是一个数组(一段空间), 每一个空间是CSlot, CSlot中存储的元素是capability.
 ```c 
 --->create_root_cnode() //初始化root CNode结构
@@ -456,7 +470,7 @@ enum {
 
 ```
 
-#### sel4中idle()和init()线程的创建
+##### sel4中idle()和init()线程的创建
 1. 线程相关的数据结构
 ```c
 /* X86 FPU context. */
@@ -638,14 +652,31 @@ __attribute__((naked)) NORETURN void idle_thread(void)
 3. init()线程的创建
 
 ```c 
-
+create_initial_thread()
+   ---->Arch_initContext()
+        ---->Mode_initContext() //把GPR全部设置为0
+        ---->Arch_initFpuContext() //设置FPU的支持
+   ---->cteInsert() //初始化TCB相关的结构,将seL4_CapInitThreadCNode, seL4_CapInitThreadVSpace,seL4_CapInitThreadIPCBuffer插入到rootserver.tcb对应的位置
+   ---->setNextPC(tcb, ui_v_entry); //设置为用户态的elf文件的entry(elf文件结构体的entry元素),init()直接执行用户态程序
+   ---->configure_sched_context()
+         --->refill_new(tcb->tcbSchedContext, MIN_REFILLS, timeslice, 0)//为该线程赋予时间片
+   ---->setupReplyMaster() //获取或者创建一个reply capability
+   ---->setThreadState()
+         --->thread_state_ptr_set_tsType(&tptr->tcbState, ts); //将线程的状态设置成ThreadState_Running
+         --->scheduleTCB(tptr);
+                  --->rescheduleRequired()
+                       ---->tcbSchedEnqueue()//通过宏SCHED_ENQUEUE()调用tcbSchedEnqueue(), 将ilde的TCB加入到调度队列中
+   ---->cap_thread_cap_new() //创建seL4_CapInitThreadTCB
+   ---->cap_sched_context_cap_new()//如果打开MSC ,需要创建seL4_CapInitThreadSC
 ```
 
 
 #### sel4线程的调度
-1. 当打开MCS,线程调度才打开.
+1. 当打开MCS,线程调度才打开.相关的数据结构
+2. scheduling context通过IPC在线程中传递(seL4_Call(), seL4_NBSendRecv()),
+3. sel4的线程优先级0-255,rootserver的优先级是255, 普通线程优先级不能超过MCP
+   创建的新线程,如果不设置线程优先级则默认为0
 ```c 
-tcbSchedEnqueue()
 
 struct tcb_queue {
     tcb_t *head;
@@ -725,5 +756,59 @@ struct reply {
     word_t padding;
 };
 #endif
-
 ```
+##### sel4 线程调度流程
+* sel4在调度之前把当前线程也加入到调度队列中
+* sel4只提供最基本的调度设置,调度算法需要在用户态自己实现,然后通过IPC,调用scheduling context实现调度
+* sel4支持域调度,当线程所处的域是active,线程才能调度.
+* sel4的域是在编译是静态确定的,跨域之间的IPC需要等到域切换才能实现.跨域进行seL4_Yield()不行
+```c 
+
+boot_sys()
+  --->schedule()  //上下文如何切换???   优先级如何计算????
+        --->isSchedulable()//宏,实际调用isRunnable(), 当线程状态为ThreadState_Running, ThreadState_Restart时,将该线程放入到调度队列中
+        --->SCHED_ENQUEUE_CURRENT_TCB //宏,实际调用tcbSchedEnqueue()加入调度队列
+        --->scheduleChooseNewThread()
+             ---->chooseThread() 
+                  --->getHighestPrio()//sel4是硬实时系统,每次选取最高优先级的线程来调度(sel4提供的线程优先级是固定的),优先级计算还没搞明白?????????,根据优先级来索引线程(调度队列就是一个链表)
+                  --->switchToThread()
+                       --->Arch_switchToThread(thread)//一些MSR寄存器的设置,架构相关,可能需要看intel手册
+                            ---->setVMRoot()//设置CR3为调度到的线程地址空间
+                            //如果支持SMP,则需要设置tcb->tcbArch.tcbContext.registers,没有看到保存上下文的代码???????????????????,不明白,应该就是那段内联汇编代码
+                            ---->x86_ibpb()
+                            ---->x86_flush_rsb()
+                       --->tcbSchedDequeue(thread)//将调度到的线程从调度队列中删除(链表节点删除)
+                       --->NODE_STATE(ksCurThread) = thread; //将全局变量ksCurThread设置为调度到的线程
+                  --->switchToIdleThread()//如果没有线程可以调度,则调度idle线程
+                      --->Arch_switchToIdleThread()
+                        //如果支持SMP,则需要设置tcb->tcbArch.tcbContext.registers
+                           ---->setVMRoot()
+  --->activateThread()//设置PC和线程状态
+      --->setNextPC(NODE_STATE(ksCurThread), pc);
+      --->setThreadState(NODE_STATE(ksCurThread), ThreadState_Running);
+        
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
